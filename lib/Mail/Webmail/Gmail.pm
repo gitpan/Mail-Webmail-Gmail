@@ -9,13 +9,13 @@ require HTTP::Cookies;
 require Crypt::SSLeay;
 require Exporter;
 
-our $VERSION = "0.06";
+our $VERSION = "0.07";
 
 our @ISA = qw(Exporter);
 our @EXPORT_OK = ();
 our @EXPORT = ();
 
-our $USER_AGENT = "User-Agent: Mozilla/5.0 (Windows; U; Windows NT 5.1; en-US; rv:1.7) Gecko/20040626 Firefox/0.8";
+our $USER_AGENT = "Mozilla/5.0 (Windows; U; Windows NT 5.1; en-US; rv:1.7) Gecko/20040626 Firefox/0.8";
 our $MAIL_URL = "http://gmail.google.com/gmail";
 our $LOGIN_URL = "https://www.google.com/accounts/ServiceLoginBoxAuth";
 our $VERIFY_URL = "https://www.google.com/accounts/CheckCookie?service=mail&chtml=LoginDoneHtml";
@@ -43,7 +43,6 @@ sub new {
         _proxy_user    => $args{proxy_username}|| '',
         _proxy_pass    => $args{proxy_password}|| '',
         _proxy_name    => $args{proxy_name}    || '',
-        _proxy_enable  => 0                    || ( defined( $args{proxy_username} ) || ( defined( $args{proxy_username} ) && defined( $args{proxy_password} ) && defined( $args{proxy_name} ) ) ),
         _logged_in     => 0,
         _err_str       => '',
         _cookies       => { },
@@ -51,6 +50,14 @@ sub new {
         _debug_level   => 0,
         _error         => 0,
     }, $class;
+
+    if ( defined( $args{proxy_name} ) ) {
+        $self->{_proxy_enable}++;
+    }
+
+    if ( defined( $args{proxy_name} ) && defined( $args{proxy_username} ) && defined( $args{proxy_password} ) ) {
+        $self->{_proxy_enable}++;
+    }
 
     return $self;
 }
@@ -68,8 +75,6 @@ sub error_msg {
 }
 
 sub login {
-    #re-login on each individual run.  Add save to disk?
-
     my ( $self ) = @_;
 
     return 0 if $self->{_logged_in};
@@ -77,8 +82,11 @@ sub login {
     my $req = HTTP::Request->new( POST => $self->{_login_url} );
     my ( $cookie );
 
-    if ( $self->{_proxy_enable} ) {
+    if ( $self->{_proxy_enable} >= 1 ) {
         $ENV{HTTPS_PROXY} = $self->{_proxy_name};
+    }
+
+    if ( $self->{_proxy_enable} >= 2 ) {    
         $ENV{HTTPS_PROXY_USERNAME} = $self->{_proxy_user};
         $ENV{HTTPS_PROXY_PASSWORD} = $self->{_proxy_pass};
     }
@@ -99,13 +107,15 @@ sub login {
             if ( $res->content() =~ /My Account/ ) {
                 $self->{_logged_in} = 1;
                 if ( $self->{_proxy_enable} ) {
-                    $self->{_ua}->proxy( 'http', $self->{_proxy_name} );
-                    delete ( $ENV{HTTPS_PROXY} );
-                    delete ( $ENV{HTTPS_PROXY_USERNAME} );
-                    delete ( $ENV{HTTPS_PROXY_PASSWORD} );
+                    if ( $self->{_proxy_enable} >= 1 ) {
+                        $self->{_ua}->proxy( 'http', $self->{_proxy_name} );
+                        delete ( $ENV{HTTPS_PROXY} );
+                    }
+                    if ( $self->{_proxy_enable} >= 1 ) {
+                        delete ( $ENV{HTTPS_PROXY_USERNAME} );
+                        delete ( $ENV{HTTPS_PROXY_PASSWORD} );
+                    }
                 }
-#                get_page( $self, start => '', search => '', view => '', req_url => 'http://www.gmail.com' );
-#                $self->{_cookies}->{PREF} .= ':FF=4:TB=2:LR=lang_en:LD=en:NR=10';
                 get_page( $self, start => '', search => '', view => '', req_url => 'http://gmail.google.com/gmail' );
                 return( 1 );
             } else {
@@ -171,9 +181,6 @@ sub update_tokens {
 }
 
 sub get_page {
-    # input: either send search and the folder name( inbox, all, starred, etc ) or send label => 'labelname'
-    # output: returns LWP $res
-
     my ( $self ) = shift;
     my ( %args ) = (
         search  => 'all',
@@ -224,18 +231,11 @@ sub get_page {
 
     if ( $method eq 'post' ) {
         $req = HTTP::Request->new( POST => $req_url . "?view=$view" );
-        $req->header( 'Cookie' => $self->{_cookie} );
-        if ( $self->{_proxy_enable} ) {
+        if ( $self->{_proxy_enable} >= 2) {
             $req->proxy_authorization_basic( $self->{_proxy_user}, $self->{_proxy_pass} );
         }
         $req->content( $url );
-        $req->header( 'Accept' => 'Accept: application/x-shockwave-flash,text/xml,application/xml,application/xhtml+xml,text/html;q=0.9,text/plain;q=0.8,video/x-mng,image/png,image/jpeg,image/gif;q=0.2,*/*;q=0.1' );
-        $req->header( 'Referer' => 'http://gmail.google.com/gmail?view=cm&zx=ef35c746e701a8732020673145' );
         $req->content_type( "application/x-www-form-urlencoded" );
-        $req->header( 'Accept-Language' => 'en-us' );
-        $req->header( 'Accept-Encoding' => 'deflate' );
-        $req->header( 'Connection' => 'Keep-Alive' );
-        $req->header( 'Cache-Control' => 'no-cache' );
         $req->header( 'Cookie' => $self->{_cookie} );
         $res = $self->{_ua}->request( $req );
     } else {
@@ -244,7 +244,7 @@ sub get_page {
         }
         $req = HTTP::Request->new( GET => $req_url . "$url" );
         $req->header( 'Cookie' => $self->{_cookie} );
-        if ( $self->{_proxy_enable} ) {
+        if ( $self->{_proxy_enable} >= 2 ) {
             $req->proxy_authorization_basic( $self->{_proxy_user}, $self->{_proxy_pass} );
         }
         $res = $self->{_ua}->request( $req );
@@ -326,6 +326,9 @@ sub edit_labels {
     } elsif ( $args{ 'action' } eq 'delete' ) {
         $action = 'dc_';
         $args{ 'new_name' } = '';
+    } elsif ( $args{ 'action' } eq 'remove' ) {
+        $action = 'rc_';
+        $args{ 'new_name' } = '';
     } elsif ( $args{ 'action' } eq 'add' ) {
         $action = 'ac_';
         $args{ 'new_name' } = '';
@@ -362,9 +365,8 @@ sub edit_labels {
 
     my $res = get_page( $self, %args );
 
-    my %functions = %{ parse_page( $self, $res ) };
-
     if ( $res->is_success() ) {
+        my %functions = %{ parse_page( $self, $res ) };
         if ( defined( $functions{ 'ar' } ) ) {
             unless ( $functions{ 'ar' }->[0] ) {
                 $self->{_error} = 1;
@@ -386,8 +388,6 @@ sub edit_labels {
 }
 
 sub get_labels {
-    # Labels are marked by the line - 'D(["ct",[(.*)]]);'
-
     my ( $self, $res ) = @_;
 
     unless ( check_login( $self ) ) { return( undef ) };
@@ -398,8 +398,6 @@ sub get_labels {
 
     if ( $res->is_success() ) {
         my %functions = %{ parse_page( $self, $res ) };
-        # Labels are returned as an array in the format [ ['Name', 'Value'] ]
-        # Not sure what the value corrisponds to, as its always been 0 for me.
 
         if ( $self->{_error} ) {
             return( undef );
@@ -465,7 +463,123 @@ sub validate_label {
     }
 }
 
-sub multi_email {
+sub edit_star {
+    my ( $self ) = shift;
+    my ( %args ) = (
+        start    => '',
+        action   => '',
+        view     => 'up',
+        @_,
+    );
+
+    unless ( check_login( $self ) ) { return( undef ) };
+
+    my $action;
+
+    if ( $args{ 'action' } eq 'add' ) {
+        $args{ 'act' } = 'st';
+    } elsif ( $args{ 'action' } eq 'remove' ) {
+        $args{ 'act' } = 'xst';
+    } else {
+        $self->{_error} = 1;
+        $self->{_err_str} .= "Error: No action defined.\n";
+        return( undef );
+    }
+    delete( $args{ 'action' } );
+
+    if ( defined( $args{ 'msgid' } ) ) {
+        $args{ 'm' } = $args{ 'msgid' };
+        delete( $args{ 'msgid' } );
+    } else {
+        $self->{_error} = 1;
+        $self->{_err_str} .= "Error: No msgid sent.\n";
+        return( undef );
+    }
+
+    $args{ 'at' } = $self->{_cookies}->{GMAIL_AT};
+
+    my $res = get_page( $self, %args );
+
+    if ( $res->is_success() ) {
+        my %functions = %{ parse_page( $self, $res ) };
+        if ( defined( $functions{ 'ar' } ) ) {
+            unless ( $functions{ 'ar' }->[0] ) {
+                $self->{_error} = 1;
+                $self->{_err_str} .= "Error: " . $functions{ 'ar' }->[1] . "\n";
+                return( undef );
+            } else {
+                return( 1 );
+            }
+        } else {
+            $self->{_error} = 1;
+            $self->{_err_str} .= "Error: Could not find label success message.\n";
+            return( undef );
+        }
+    } else {
+        $self->{_error} = 1;
+        $self->{_err_str} .= "Error: While requesting: '$res->{_request}->{_uri}'.\n";
+        return( undef );
+    }
+}
+
+sub edit_archive {
+    my ( $self ) = shift;
+    my ( %args ) = (
+        action => '',
+        msgid  => '',
+        method => 'post',
+        @_,
+    );
+
+    unless ( check_login( $self ) ) { return( undef ) };
+
+    if ( $args{ 'action' } eq 'archive' ) {
+        $args{ 'act' } = 'rc_' . lc( $FOLDERS{ 'INBOX' } );
+    } elsif ( $args{ 'action' } eq 'unarchive' ) {
+        $args{ 'act' } = 'ib';
+    } else {
+        $self->{_error} = 1;
+        $self->{_err_str} .= "Error: No action defined.\n";
+        return( undef );
+    }
+    delete( $args{ 'action' } );
+
+    if ( defined( $args{ 'msgid' } ) ) {
+        $args{ 't' } = $args{ 'msgid' };
+        delete( $args{ 'msgid' } );
+    } else {
+        $self->{_error} = 1;
+        $self->{_err_str} .= "Error: No msgid sent.\n";
+        return( undef );
+    }
+
+    $args{ 'at' } = $self->{_cookies}->{GMAIL_AT};
+
+    my $res = get_page( $self, %args );
+
+    if ( $res->is_success() ) {
+        my %functions = %{ parse_page( $self, $res ) };
+        if ( defined( $functions{ 'ar' } ) ) {
+            unless ( $functions{ 'ar' }->[0] ) {
+                $self->{_error} = 1;
+                $self->{_err_str} .= "Error: " . $functions{ 'ar' }->[1] . "\n";
+                return( undef );
+            } else {
+                return( 1 );
+            }
+        } else {
+            $self->{_error} = 1;
+            $self->{_err_str} .= "Error: Could not find archive success message.\n";
+            return( undef );
+        }
+    } else {
+        $self->{_error} = 1;
+        $self->{_err_str} .= "Error: While requesting: '$res->{_request}->{_uri}'.\n";
+        return( undef );
+    }
+}
+
+sub multi_email_addr {
     my $array_ref = shift;
 
     my $email_list;
@@ -499,7 +613,7 @@ sub send_message {
     if ( ( $args{to} ne '' ) || ( $args{cc} ne '' ) || ( $args{bcc} ne '' ) ) {
         foreach( 'to', 'cc', 'bcc' ) {
             if ( ref( $args{$_} ) eq 'ARRAY' ) {
-                $args{$_} = multi_email( $args{$_} );
+                $args{$_} = multi_email_addr( $args{$_} );
             }
         }
 
@@ -564,9 +678,6 @@ sub get_messages {
 
     if ( $res->is_success() ) {
         my %functions = %{ parse_page( $self, $res ) };
-        # Messages are returned as an array in the format 
-        # [ ['msgid', new, value, 'date received', 'sender email + name', 'value', 'subject', 'blurb', ['labels'], 'attachments', 'msg id again? (might be thread id)', value ] ]
-        # Values are the unknowns.
 
         if ( $self->{_error} ) {
             return( undef );
@@ -582,6 +693,7 @@ sub get_messages {
             my %indv_email;
             $indv_email{ 'id' }            = remove_quotes( $email_line[0] );
             $indv_email{ 'new' }           = remove_quotes( $email_line[1] );
+            $indv_email{ 'starred' }       = remove_quotes( $email_line[2] );
             $indv_email{ 'date_received' } = remove_quotes( $email_line[3] );
             $indv_email{ 'sender_email' }  = remove_quotes( $email_line[4] );
                 $indv_email{ 'sender_email' } =~ /'\\>(.*?)\\/;
@@ -604,7 +716,6 @@ sub get_messages {
 }
 
 sub get_indv_email {
-    # Email is marked by the lines -  message info: D(["mi"...]); and message body: D("mb"...]);
     my ( $self ) = shift;
     my ( %args ) = (
         view   => 'pt',
@@ -661,10 +772,6 @@ sub get_indv_email {
 
     if ( $res->is_success() ) {
         my %functions = %{ parse_page( $self, $res ) };
-        # Messages are returned as an array in the format
-        # message info:
-        # [ [value, order in thread?, "id", value, value, "sender name", "sender email", "sender name", 'date sent?', 'recpients email', "value", "value", "value", "date read?", "subject", "blurb?", [["attach id", "attachment name", "encoding", value]], value, "value"]
-        # Values are the unknowns.
 
         if ( defined( $functions{ 'mi' } ) ) {
             my %messages;
@@ -710,8 +817,6 @@ sub get_indv_email {
 }
 
 sub get_attachment {
-    # input: expects caller to send attid ( the attachment ID ) and msgid ( the message ID )
-    # returns: a reference to the attachment
     my ( $self ) = shift;
     my ( %args ) = (
         view   => 'att',
@@ -784,11 +889,6 @@ sub recurse_slash {
 }
 
 sub extract_fields {
-    # I would really like to find a module to do this, but Text::CSV fails on ,[data, data],
-    # and Text::Balanced gets confused unless the delim is the same throughout the string.
-    # input: string (line to be parsed)
-    # output: array (elements)
-
     my ( $line ) = @_;
     my @fields;
     my $in_quotes = 0;
@@ -970,7 +1070,7 @@ Returns an array of all user defined labels.
 
 =head2 EDITING LABELS
 
-There are four actions that can currently be preformed on labels.  As a note, this module enforces Gmail's 
+There are five actions that can currently be preformed on labels.  As a note, this module enforces Gmail's 
 limits on label creation.  A label cannot be over 40 characters, and a label cannot contain the character '^'.  
 On failure, error and error_msg are set.
 
@@ -985,6 +1085,29 @@ On failure, error and error_msg are set.
 
     #adding a label to a message.
     $gmail->edit_labels( label => 'label_name', action => 'add', msgid => $message_id );
+
+    #removing a label from a message.
+    $gmail->edit_labels( label => 'label_name', action => 'remove', msgid => $message_id );
+
+=head2 STARRING A MESSAGE
+
+To star or unstar a message use these examples
+
+    #star
+    $gmail->edit_star( action => 'add', 'msgid' => $msgid );
+
+    #unstar
+    $gmail->edit_star( action => 'remove', 'msgid' => $msgid );
+
+=head2 ARCHIVING
+
+To archive or unarchive a message use these examples
+
+    #archive
+    $gmail->edit_archive( action => 'archive', 'msgid' => $msgid );
+
+    #unarchive
+    $gmail->edit_archive( action => 'unarchive', 'msgid' => $msgid );
 
 =head2 RETRIEVING MESSAGE LISTS
 
@@ -1008,6 +1131,7 @@ The Array of hashes is in the following format
 
     $indv_email{ 'id' }
     $indv_email{ 'new' }
+    $indv_email{ 'starred' }
     $indv_email{ 'date' }
     $indv_email{ 'sender' }
     $indv_email{ 'subject' }
@@ -1017,7 +1141,7 @@ The Array of hashes is in the following format
 
 The format provided by Gmail is ( unknowns are denoted by value )
 
-    [ ['msgid', is new?, value, 'date', 'sender email + name', 'value', 'subject', 'blurb', ['labels'], 
+    [ ['msgid', new, starred, 'date', 'sender email + name', 'value', 'subject', 'blurb', ['labels'], 
     'attachments', 'msg id again? (might be thread id)', value ] ]
 
 =head2 SPACE REMAINING

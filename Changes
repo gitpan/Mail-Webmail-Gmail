@@ -1,5 +1,12 @@
 Revision history for Perl extension Mail::Webmail::Gmail.
 
+0.07  Thu Jul 15 12:35:00 2004
+    - Added the ability to star and unstar messages.
+    - Added the ability to achive and unachive messages.
+    - Added the ability to remove a label from a message.
+    - Cleaned up HTTP headers.
+    - Made further modifications to how proxy's are handled.
+
 0.06  Wed Jul 14 16:39:00 2004
     - Reversed order of changes file to make veiwing new updates easier to view.
     - Fixed the proxy code so that users that have a proxy, but not a login can
