@@ -6,10 +6,11 @@ use strict;
 require LWP::UserAgent;
 require HTTP::Headers;
 require HTTP::Cookies;
+require HTTP::Request::Common;
 require Crypt::SSLeay;
 require Exporter;
 
-our $VERSION = "0.08";
+our $VERSION = "0.09";
 
 our @ISA = qw(Exporter);
 our @EXPORT_OK = ();
@@ -17,6 +18,7 @@ our @EXPORT = ();
 
 our $USER_AGENT = "Mozilla/5.0 (Windows; U; Windows NT 5.1; en-US; rv:1.7) Gecko/20040626 Firefox/0.8";
 our $MAIL_URL = "http://gmail.google.com/gmail";
+our $SSL_MAIL_URL = "https://gmail.google.com/gmail";
 our $LOGIN_URL = "https://www.google.com/accounts/ServiceLoginBoxAuth?service=mail&continue=http://gmail.google.com/gmail";
 
 our %FOLDERS = (
@@ -31,13 +33,13 @@ sub new {
     my %args = @_;
 
     my $ua = new LWP::UserAgent( agent => $USER_AGENT, keep_alive => 1 );
-    push(@LWP::Protocol::http::EXTRA_SOCK_OPTS, SendTE => 0);
+    push( @LWP::Protocol::http::EXTRA_SOCK_OPTS, SendTE => 0 );
     
     my $self = bless {
-        _username      => $args{username}      || die('No username defined'),
-        _password      => $args{password}      || die('No password defined'),
+        _username      => $args{username}      || die( 'No username defined' ),
+        _password      => $args{password}      || die( 'No password defined' ),
         _login_url     => $args{login_server}  || $LOGIN_URL,
-        _mail_url      => $args{mail_server}   || $MAIL_URL,
+        _mail_url      => $args{mail_server}   || $args{encrypt_session} ? $SSL_MAIL_URL : $MAIL_URL,
         _proxy_user    => $args{proxy_username}|| '',
         _proxy_pass    => $args{proxy_password}|| '',
         _proxy_name    => $args{proxy_name}    || '',
@@ -51,10 +53,9 @@ sub new {
 
     if ( defined( $args{proxy_name} ) ) {
         $self->{_proxy_enable}++;
-    }
-
-    if ( defined( $args{proxy_name} ) && defined( $args{proxy_username} ) && defined( $args{proxy_password} ) ) {
-        $self->{_proxy_enable}++;
+        if ( defined( $args{proxy_username} ) && defined( $args{proxy_password} ) ) {
+            $self->{_proxy_enable}++;
+        }
     }
 
     return $self;
@@ -79,17 +80,16 @@ sub login {
 
     return 0 if $self->{_logged_in};
 
-    my $req = HTTP::Request->new( POST => $self->{_login_url} );
-    my ( $cookie );
-
     if ( $self->{_proxy_enable} >= 1 ) {
         $ENV{HTTPS_PROXY} = $self->{_proxy_name};
+        if ( $self->{_proxy_enable} >= 2 ) {    
+            $ENV{HTTPS_PROXY_USERNAME} = $self->{_proxy_user};
+            $ENV{HTTPS_PROXY_PASSWORD} = $self->{_proxy_pass};
+        }
     }
 
-    if ( $self->{_proxy_enable} >= 2 ) {    
-        $ENV{HTTPS_PROXY_USERNAME} = $self->{_proxy_user};
-        $ENV{HTTPS_PROXY_PASSWORD} = $self->{_proxy_pass};
-    }
+    my $req = HTTP::Request->new( POST => $self->{_login_url} );
+    my ( $cookie );
 
     $req->content_type( "application/x-www-form-urlencoded" );
     $req->content( 'Email=' . $self->{_username} . '&Passwd=' . $self->{_password} . '&null=Sign%20in' );
@@ -124,7 +124,7 @@ sub login {
                 } else {
                     $self->{_error} = 1;
                     $self->{_err_str} .= "Error: Could not login with those credentials\n";
-                     $self->{_err_str} .= "  Additionally, HTTP error: " . $res->status_line . "\n";
+                    $self->{_err_str} .= "  Additionally, HTTP error: " . $res->status_line . "\n";
                     return;
                 }
             } else {
@@ -237,20 +237,21 @@ sub get_page {
         }
     }
 
-    $url = join( '&', map{ "$_=$args{ $_ }"; }( keys %args ) );
-
     if ( $method eq 'post' ) {
-        $req = HTTP::Request->new( POST => $req_url . "?view=$view" );
-        if ( $self->{_proxy_enable} >= 2) {
+        $req = HTTP::Request::Common::POST( $req_url,
+            Content_Type => 'multipart/form-data',
+            Connection   => 'Keep-Alive',
+            'Keep-Alive' => 300,
+            Cookie       => $self->{_cookie},
+            Content      => [ view => $view, %args ] );
+        if ( $self->{_proxy_enable} >= 2 ) {
             $req->proxy_authorization_basic( $self->{_proxy_user}, $self->{_proxy_pass} );
         }
-        $req->content( $url );
-        $req->content_type( "application/x-www-form-urlencoded" );
-        $req->header( 'Cookie' => $self->{_cookie} );
         $res = $self->{_ua}->request( $req );
     } else {
+        $url = join( '&', map{ "$_=$args{ $_ }"; }( keys %args ) );
         if ( $url ne '' ) {
-           $url = '?' . $url;
+            $url = '?' . $url;
         }
         $req = HTTP::Request->new( GET => $req_url . "$url" );
         $req->header( 'Cookie' => $self->{_cookie} );
@@ -772,7 +773,7 @@ sub get_indv_email {
         delete( $args{ 'msg' } );
     } else {
         $self->{_error} = 1;
-        $self->{_err_str} .= "Error: Must specifie either id and label or send a reference to a valid message with msg.\n";
+        $self->{_err_str} .= "Error: Must specify either id and label or send a reference to a valid message with msg.\n";
         return;
     }
 
@@ -813,6 +814,11 @@ sub get_indv_email {
                 if ( $args{ 'th' } eq $email[2] ) {
                     my $body = extract_fields( $functions{ 'mb' }->[0] );
                     $message{ 'body' } = $body->[0];
+                    if ( defined( $functions{ 'cs' } ) ) {
+                        if ( $functions{ 'cs' }[8] ne '' ) {
+                            $message{ 'ads' } = get_ads( $self, adkey => remove_quotes( $functions{ 'cs' }[8] ) );
+                        }
+                    }
                 }
                 $messages{ $email[2] } = \%message;
             }
@@ -824,6 +830,48 @@ sub get_indv_email {
         $self->{_err_str} .= "Error: While requesting: '$res->{_request}->{_uri}'.\n";
         return;
     }
+}
+
+sub get_ads {
+    my ( $self ) = shift;
+    my ( %args ) = (
+        adkey  => '',
+        view   => 'ad',
+        search => '',
+        start  => '',
+        @_, );
+
+    unless ( check_login( $self ) ) { return };
+
+    if ( $args{ 'adkey' } ne '' ) {
+        my $res = get_page( $self, %args );
+        if ( $res->is_success() ) {
+            my $ad_text = $res->content();
+            $ad_text =~ s/\n//g;
+            $ad_text =~ /\[\[(.*?)\]\],/;
+            $ad_text = $1;
+            my @indv_ads = @{ extract_fields( $ad_text ) };
+            my @ads;
+            foreach ( @indv_ads ) {
+                my @split_ad = @{ extract_fields( $_ ) };
+                my %ad_hash = (
+                    title       => remove_quotes( $split_ad[0] ),
+                    body        => remove_quotes( $split_ad[1] ),
+                    vendor_link => remove_quotes( $split_ad[2] ),
+                    link        => remove_quotes( $split_ad[3] ), );
+                push( @ads, \%ad_hash );
+            }
+            return( \@ads );
+        } else {
+            $self->{_error} = 1;
+            $self->{_err_str} .= "Error: " . $res->status_line();
+        }
+    } else {
+        $self->{_error} = 1;
+        $self->{_err_str} .= "Error: Must send adkey.\n";
+    }
+
+    return;
 }
 
 sub get_attachment {
@@ -903,6 +951,7 @@ sub extract_fields {
     my @fields;
     my $in_quotes = 0;
     my $in_brackets = 0;
+    my $in_brackets_quotes = 0;
     my $delim_count = 0;
     my $end_field = 0;
     my $field = '';
@@ -918,22 +967,32 @@ sub extract_fields {
             }
             $field .= $char;
         } elsif ( $in_brackets ) {
-            if ( $char eq '[' ) {
-                $delim_count++;
+            if ( $in_brackets_quotes ) {
+                if ( ( $char eq '"' ) && ( !recurse_slash( $field ) ) ) {
+                    $in_brackets_quotes = 0;
+                }
                 $field .= $char;
-            } elsif ( $char eq ']' ) {
-                $delim_count--;
-                if ( $delim_count == 0 ) {
-                    $in_brackets = 0;
-                    $end_field = 1;
-                    if ( $field eq '' ) {
-                        push( @fields, '' );
+            } elsif ( $char eq '"' ) {
+                $in_brackets_quotes = 1;
+                $field .= $char;
+            } else {
+                if ( $char eq '[' ) {
+                    $delim_count++;
+                    $field .= $char;
+                } elsif ( $char eq ']' ) {
+                    $delim_count--;
+                    if ( $delim_count == 0 ) {
+                        $in_brackets = 0;
+                        $end_field = 1;
+                        if ( $field eq '' ) {
+                            push( @fields, '' );
+                        }
+                    } else {
+                        $field .= $char;
                     }
                 } else {
                     $field .= $char;
                 }
-            } else {
-                $field .= $char;
             }
         } elsif ( $char eq '"' ) {
             $in_quotes = 1;
@@ -997,6 +1056,8 @@ sub parse_page {
             $line =~ s/^\["(.*?)",?//;
             my $function = $1;
             $line =~ s/\]$//;
+            if ( $function eq 't' ) {
+            }
             if ( ( uc( $function ) eq 'MI' ) || ( uc( $function ) eq 'MB' ) ) {
                 $functions{ $function } .= "[$line],";
             } else {
@@ -1070,6 +1131,11 @@ This module does support the use of a proxy server
                 proxy_password => 'proxy_password',
                 proxy_name => 'proxy_server' );
 
+By default, this module only encrypts the logon process.  To encrypt the entire session, use
+the argument encrypt_session
+
+    my $gmail = Mail::Webmail::Gmail->new( username => 'username', password => 'password', encrypt_session => 1 );
+
 After that, you are free to start making requests for data.
 
 =head2 RETRIEVING LABELS
@@ -1135,7 +1201,7 @@ Or request a Gmail provided folder using one of the provided variables
 
     Ex.
 
-    my $messages = $gmail->get_messages( label => $Gmail::FOLDERS{ 'INBOX' } );
+    my $messages = $gmail->get_messages( label => $Mail::Webmail::Gmail::FOLDERS{ 'INBOX' } );
 
 The Array of hashes is in the following format
 
@@ -1171,7 +1237,7 @@ There are two ways to get an individual message:
     By sending a reference to a specific message returned by get_messages
 
     #prints out the message body for all messages in the starred folder
-    my $messages = $gmail->get_messages( label => $Gmail::FOLDERS{ 'STARRED' } );
+    my $messages = $gmail->get_messages( label => $Mail::Webmail::Gmail::FOLDERS{ 'STARRED' } );
     foreach ( @{ $messages } ) {
         my $message = $gmail->get_indv_email( msg => $_ );
         print "$message->{ $_->{ 'id' } }->{ 'body' }\n";
@@ -1194,7 +1260,15 @@ Hash of messages in thread by ID
     $indv_email{ 'read' }
     $indv_email{ 'subject' }
     $indv_email{ 'attachments' } = Array of Arrays
-    $indv_email{ 'body' } (if it is the main message in the thread)
+
+    If it is the main message in the thread
+        $indv_email{ 'body' }
+        $indv_email{ 'ads' } An array of ads in the following format:
+            my %ad_hash = (
+                title       => '',
+                body        => '',
+                vendor_link => '',
+                link        => '', );
 
 The format provided by Gmail is ( unknowns are denoted by value )
 
@@ -1217,6 +1291,10 @@ To send to multiple users, send an arrayref containing all of the users
     $gmail->send_message( to => $email_addrs, subject => 'Test Message', msgbody => 'This is a test.' );
 
 You may also send mail using cc and bcc.
+
+To attach files to a message
+
+    $gmail->send_message( to => 'user@domain.com', subject => 'Test Message', msgbody => 'This is a test.', file0 => ["/tmp/foo"], file1 => ["/tmp/bar"] );
 
 =head2 GETTING ATTACHMENTS
 
@@ -1353,8 +1431,8 @@ below is a listing of some of the tests that I use as I test various features
     $messages = $gmail->get_messages();
 
     print "By folder\n";
-    foreach ( keys %Gmail::FOLDERS ) {
-        my $messages = $gmail->get_messages( label => $Gmail::FOLDERS{ $_ } );
+    foreach ( keys %Mail::Webmail::Gmail::FOLDERS ) {
+        my $messages = $gmail->get_messages( label => $Mail::Webmail::Gmail::FOLDERS{ $_ } );
         print "\t$_:\n";
         if ( @{ $messages } ) {
             foreach ( @{ $messages } ) {
@@ -1408,6 +1486,8 @@ this module started (whether they know it or not)
 =item Erik F. Kastner (WWW::Scraper::Gmail)
 
 =item Abiel J. (C# Gmail API - http://www.migraineheartache.com/)
+
+=item Daniel Stutz (http://www.use-strict.net)
 
 =back
 

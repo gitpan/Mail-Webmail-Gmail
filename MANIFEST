@@ -1,7 +1,8 @@
 Changes
 Makefile.PL
 MANIFEST
-META.yml
 README
+README.WINDOWS
+TO-DO
 lib/Mail/Webmail/Gmail.pm
 t/use.t

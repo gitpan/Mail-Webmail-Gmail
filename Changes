@@ -1,8 +1,32 @@
 Revision history for Perl extension Mail::Webmail::Gmail.
 
+0.09  Thu Aug 12 22:14:00 2004
+    - Added a README.WINDOWS to help with the complexity of installing
+      Crypt::SSLeay under that platform.
+    - Added the ability to send attachments ( Thank you Daniel Stutz )
+    - Added encrypt_session, which allows you to encrypt your entire
+      Gmail session, not just the logon process.
+    - Added the ability to pull ads.  Ads are automatically pulled when
+      you request a message thread.
+    - Removed reference to META.YML in the manifest.
+    - Fixed some spelling errors ( I think I do this everytime. )
+    - Fixed example scripts, changed reference of $Gmail::FOLDERS to
+      $Mail::Webmail::Gmail::FOLDERS ( thanks tristan! )
+    - Fixed parsing error when there were unmatched square brackets
+      in a field ( Thanks again Daniel! )
+    - Proxy support has stopped working for me, not sure if its an
+      issue with the proxy I've been using, or if its an issue with
+      the update I did to the logon process in 0.08.  ( After more testing
+      it appears that something changed with the proxy that Im using,
+      further investigation will be required to find out what I can do
+      to fix it.  Let me know if this breaks for anyone else. )
+    - I have met all of my goals for 1.0, so I guess this is the first
+      1.0 candidate, let me know what you think.
+
 0.08  Sat Aug  7 11:54:00 2004
     - Updated the logon process after Google updated it.
-    - some funtions didnt return undef properly in list context, fixed.
+    - Some functions didnt return undef properly in list context, fixed.
+    - Updated error_msg, error_msg now resets the error string to ''.
 
 0.07  Thu Jul 15 12:35:00 2004
     - Added the ability to star and unstar messages.

@@ -1,4 +1,4 @@
-Mail-Webmail-Gmail version 0.02
+Mail-Webmail-Gmail version 0.09
 ===============================
 
 INSTALLATION
@@ -14,14 +14,15 @@ DEPENDENCIES
 
 This module requires these other modules and libraries:
 
-use lib qw(lib);
-require LWP::UserAgent;
-require HTTP::Headers;
-require HTTP::Cookies;
-require Crypt::SSLeay;
-require Exporter;
+lib qw(lib)
+LWP::UserAgent
+HTTP::Headers
+HTTP::Cookies
+HTTP::Request::Common
+Crypt::SSLeay
+Exporter
 
-COPYRIGHT AND LICENCE
+COPYRIGHT AND LICENSE
 
 Copyright 2004, Allen Holman.  All rights reserved.  
 
@@ -71,9 +72,11 @@ SAMPLE USAGE
 
     my $messages = $gmail->get_messages( label => $labels[0] );
 
-    foreach ( @{ $messages } ) {
-        if ( $_->{ 'new' } ) {
-            print "Subject: " . $_->{ 'subject' } . " / Blurb: " . $_->{ 'blurb' } . "\n";
+    if ( defined( $messages ) ) {
+        foreach ( @{ $messages } ) {
+            if ( $_->{ 'new' } ) {
+                print "Subject: " . $_->{ 'subject' } . " / Blurb: " . $_->{ 'blurb' } . "\n";
+            }
         }
     }
     ###
@@ -89,6 +92,22 @@ SAMPLE USAGE
                 if ( $gmail->error() ) {
                     print $gmail->error_msg();
                 }
+            }
+        }
+    }
+    ###
+
+    ### Prints out the vendor link from Ads attached to a message
+    $messages = $gmail->get_messages( label => $Mail::Webmail::Gmail::FOLDERS{ 'INBOX' } );
+
+    print @{ $messages } . "\n";
+    foreach ( @{ $messages } ) {
+        print "ID: " . $_->{ 'id' } . "\n";
+        my %email = %{ $gmail->get_indv_email( msg => $_ ) };
+        if ( $email{ $_->{ 'id' } }->{ 'ads' } ) {
+            my $ads;
+            foreach $ads ( @{ $email{ $_->{ 'id' } }->{ 'ads' } } ) {
+                print "AD LINK: $ads->{vendor_link}\n";
             }
         }
     }
@@ -112,9 +131,11 @@ SAMPLE USAGE
     foreach ( $gmail->get_labels() ) {
         $messages = $gmail->get_messages( label => $_ );
         print "\t$_:\n";
-        if ( @{ $messages } ) {
-            foreach ( @{ $messages } ) {
-                print "\t\t$_->{ 'subject' }\n";
+        if ( defined( $messages ) ) {
+            if ( @{ $messages } ) {
+                foreach ( @{ $messages } ) {
+                    print "\t\t$_->{ 'subject' }\n";
+                }
             }
         }
     }
