@@ -9,7 +9,7 @@ require HTTP::Cookies;
 require Crypt::SSLeay;
 require Exporter;
 
-our $VERSION = "0.05";
+our $VERSION = "0.06";
 
 our @ISA = qw(Exporter);
 our @EXPORT_OK = ();
@@ -43,7 +43,7 @@ sub new {
         _proxy_user    => $args{proxy_username}|| '',
         _proxy_pass    => $args{proxy_password}|| '',
         _proxy_name    => $args{proxy_name}    || '',
-        _proxy_enable  => 0                    || ( defined( $args{proxy_username} ) && defined( $args{proxy_password} ) && defined( $args{proxy_name} ) ),
+        _proxy_enable  => 0                    || ( defined( $args{proxy_username} ) || ( defined( $args{proxy_username} ) && defined( $args{proxy_password} ) && defined( $args{proxy_name} ) ) ),
         _logged_in     => 0,
         _err_str       => '',
         _cookies       => { },
@@ -1268,7 +1268,9 @@ this module started (whether they know it or not)
 =over 4
 
 =item Simon Drabble (Mail::Webmail::Yahoo)
+
 =item Erik F. Kastner (WWW::Scraper::Gmail)
+
 =item Abiel J. (C# Gmail API - http://www.migraineheartache.com/)
 
 =back

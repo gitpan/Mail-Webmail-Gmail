@@ -1,6 +1,7 @@
 Changes
 Makefile.PL
 MANIFEST
+META.yml
 README
 lib/Mail/Webmail/Gmail.pm
 t/use.t
