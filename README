@@ -7,6 +7,7 @@ To install this module type the following:
 
     perl Makefile.PL
     make
+    make test
     make install
 
 DEPENDENCIES
@@ -32,6 +33,30 @@ SAMPLE USAGE
     my ( $gmail ) = Gmail->new( 
             username => 'username', password => 'password', );
 
+    ### Test Sending Message ####
+    my $msgid = $gmail->send_message( to => 'testuser@test.com', subject => time(), msgbody => 'Test' );
+    print "Msgid: $msgid\n";
+    if ( $msgid ) {
+        if ( $gmail->error() ) {
+            print $gmail->error_msg();
+        } else {
+            ### Create new label ###
+            my $test_label = "tl_" . time();
+            $gmail->edit_labels( label => $test_label, action => 'create' );
+            if ( $gmail->error() ) {
+                print $gmail->error_msg();
+            } else {
+                ### Add this label to our new message ###
+                $gmail->edit_labels( label => $test_label, action => 'add', 'msgid' => $msgid );
+                if ( $gmail->error() ) {
+                    print $gmail->error_msg();
+                } else {
+                    print "Added label: $test_label to message $msgid\n";
+                }
+            }
+        }
+    }
+
     ### Prints out new messages attached to the first label
     my @labels = $gmail->get_labels();
 
@@ -45,7 +70,7 @@ SAMPLE USAGE
     ###
 
     ### Prints out all attachments
-    my $messages = $gmail->get_messages();
+    $messages = $gmail->get_messages();
 
     foreach ( @{ $messages } ) {
         my $email = $gmail->get_indv_email( msg => $_ );
@@ -61,7 +86,7 @@ SAMPLE USAGE
     ###
 
     ### Shows different ways to look through your email
-    my $messages = $gmail->get_messages();
+    $messages = $gmail->get_messages();
 
     print "By folder\n";
     foreach ( keys %Gmail::FOLDERS ) {
@@ -76,7 +101,7 @@ SAMPLE USAGE
 
     print "By label\n";
     foreach ( $gmail->get_labels() ) {
-        my $messages = $gmail->get_messages( label => $_ );
+        $messages = $gmail->get_messages( label => $_ );
         print "\t$_:\n";
         if ( @{ $messages } ) {
             foreach ( @{ $messages } ) {
@@ -86,7 +111,7 @@ SAMPLE USAGE
     }
 
     print "All (Note: the All folder skips trash)";
-    my $messages = $gmail->get_messages();
+    $messages = $gmail->get_messages();
     if ( @{ $messages } ) {
         foreach ( @{ $messages } ) {
             print "\t\t$_->{ 'subject' }\n";

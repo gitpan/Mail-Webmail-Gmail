@@ -3,3 +3,4 @@ Makefile.PL
 MANIFEST
 README
 lib/Mail/Webmail/Gmail.pm
+t/use.t

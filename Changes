@@ -13,3 +13,12 @@ Revision history for Perl extension Mail::Webmail::Gmail.
 	    - Fixed some references incorrectly calling Gmail, "gmail".
     - Updated error_msg.  error_msg now resets error to 0.
     - Added edit_labels, now you can add, rename, and delete labels.
+
+0.04  (never released)
+    - cleaned up misc code.
+    - Added simple test for install.
+
+0.05  Tue Jul 13 17:00:00 2004
+    - Cleaned up how cookies are handled.
+    - Added the ability to send email.
+    - Added the ability to label a message.

@@ -9,13 +9,13 @@ require HTTP::Cookies;
 require Crypt::SSLeay;
 require Exporter;
 
-our $VERSION = "0.03";
+our $VERSION = "0.05";
 
 our @ISA = qw(Exporter);
 our @EXPORT_OK = ();
 our @EXPORT = ();
 
-our $USER_AGENT = "Mozilla/5.0 (X11; U; Linux i686; en-US; rv:1.4b) Gecko/20030430 Mozilla Firebird/0.6"; 
+our $USER_AGENT = "User-Agent: Mozilla/5.0 (Windows; U; Windows NT 5.1; en-US; rv:1.7) Gecko/20040626 Firefox/0.8";
 our $MAIL_URL = "http://gmail.google.com/gmail";
 our $LOGIN_URL = "https://www.google.com/accounts/ServiceLoginBoxAuth";
 our $VERIFY_URL = "https://www.google.com/accounts/CheckCookie?service=mail&chtml=LoginDoneHtml";
@@ -31,7 +31,8 @@ sub new {
     my $class = shift;
     my %args = @_;
 
-    my $ua = new LWP::UserAgent( agent => $USER_AGENT );
+    my $ua = new LWP::UserAgent( agent => $USER_AGENT, keep_alive => 1 );
+    push(@LWP::Protocol::http::EXTRA_SOCK_OPTS, SendTE => 0);
     
     my $self = bless {
         _username      => $args{username}      || die('No username defined'),
@@ -45,12 +46,10 @@ sub new {
         _proxy_enable  => 0                    || ( defined( $args{proxy_username} ) && defined( $args{proxy_password} ) && defined( $args{proxy_name} ) ),
         _logged_in     => 0,
         _err_str       => '',
-        _gv            => '',
-        _g_at          => '',
-        _sid           => '',
+        _cookies       => { },
         _ua            => $ua,
         _debug_level   => 0,
-        _error          => 0,
+        _error         => 0,
     }, $class;
 
     return $self;
@@ -89,18 +88,14 @@ sub login {
     my $res = $self->{_ua}->request( $req );
 
     if ( $res->is_success() ) {
-        my $header = $res->header( 'Set-Cookie' );
-        $header =~ /(SID=.*?;)/;
-        $cookie = $1;
-        $cookie =~ /^SID=(.*);/;
-        $self->{_sid} = $1;
         $res->content() =~ /cookieVal=[ ]?\"(.*)\";/;
-        $cookie .= "GV=$1";
-        $self->{_gv} = $1;
-        $self->{_cookie} = HTTP::Headers->new( Cookie => $cookie );
-        $req = HTTP::Request->new( GET => $self->{_verify_url}, $self->{_cookie} );
+        $self->{_cookies}->{GV} = $1;
+        update_tokens( $self, $res );
+        $req = HTTP::Request->new( GET => $self->{_verify_url} );
+        $req->header( 'Cookie' => $self->{_cookie} );
         $res = $self->{_ua}->request( $req );
         if ( $res->is_success() ) {
+            update_tokens( $self, $res );
             if ( $res->content() =~ /My Account/ ) {
                 $self->{_logged_in} = 1;
                 if ( $self->{_proxy_enable} ) {
@@ -109,7 +104,9 @@ sub login {
                     delete ( $ENV{HTTPS_PROXY_USERNAME} );
                     delete ( $ENV{HTTPS_PROXY_PASSWORD} );
                 }
-                get_page( $self, label => $FOLDERS{ 'TRASH' } ); ### CALLED TO SET THE TOKENS, use TRASH because its probably the smallest page
+#                get_page( $self, start => '', search => '', view => '', req_url => 'http://www.gmail.com' );
+#                $self->{_cookies}->{PREF} .= ':FF=4:TB=2:LR=lang_en:LD=en:NR=10';
+                get_page( $self, start => '', search => '', view => '', req_url => 'http://gmail.google.com/gmail' );
                 return( 1 );
             } else {
                 $self->{_error} = 1;
@@ -146,25 +143,30 @@ sub check_login {
 sub update_tokens {
     my ( $self, $res ) = @_;
 
-    unless ( $res->is_success() ) {
-        $self->{_error} = 1;
-        $self->{_err_str} .= "Error: Could not update tokens because request for: '$res->{_request}->{_uri}' failed.\n";
-        return( undef );
-    } else {
-        my $header = $res->header( 'Set-Cookie' );
-        if ( $header =~ /(SID=.*?;)/ ) {
-            $self->{_sid} = $1;
-            $self->{_sid} =~ /^SID=(.*);/;
-            $self->{_sid} = $1;
+    my $previous = $res->previous();
+    if ( $previous ) {
+        update_tokens( $self, $previous );
+    }
+    my $header = $res->header( 'Set-Cookie' );
+    if ( defined( $header ) ) {
+        my ( @cookies ) = split( ',', $header );
+        foreach( @cookies ) {
+            $_ =~ s/^\s*//;
+            if ( $_ =~ /(.*?)=(.*?);/ ) {
+                if ( $2 eq '' ) {
+                    delete( $self->{_cookies}->{$1} );
+                } else {
+                    unless ( $1 =~ /\s/ ) {
+                        if ( $1 ne '' ) {
+                            $self->{_cookies}->{$1} = $2;
+                        } else {
+                            $self->{_cookies}->{'Session'} = $2;
+                        }
+                    }
+                }
+            }
         }
-
-        if ( $header =~ /(GMAIL_AT=.*?;)/ ) {
-            $self->{_g_at} = $1;
-            $self->{_g_at} =~ /^GMAIL_AT=(.*);/;
-            $self->{_g_at} = $1;
-        }
-
-        $self->{_cookie} = HTTP::Headers->new( Cookie => join( ';', ( "SID=$self->{_sid}", "GMAIL_AT=$self->{_g_at}", "GV=$self->{_gv}" ) ) );
+        $self->{_cookie} = join( '; ', map{ "$_=$self->{_cookies}->{$_}"; }( sort keys %{ $self->{_cookies} } ) );
     }
 }
 
@@ -178,8 +180,11 @@ sub get_page {
         view    => 'tl',
         start   => 0,
         method  => '',
+        req_url => $self->{_mail_url},
         @_, );
-    my ( $res, $req );
+    my ( $res, $req, $req_url );
+
+    unless ( check_login( $self ) ) { return( undef ) };
 
     if ( defined( $args{ 'label' } ) ) {
         $args{ 'label' } = validate_label( $self, $args{ 'label' } );
@@ -192,48 +197,71 @@ sub get_page {
         }
     }
 
-    unless ( check_login( $self ) ) { return( undef ) };
+    $req_url = $args{ 'req_url' };
+    delete( $args{ 'req_url' } );
 
-    my ( $url, $method, $view );
+    my ( $url, $method, $view ) = '' x 3;
 
     $method = $args{ 'method' };
     delete( $args{ 'method' } );
+
     if ( $method eq 'post' ) {
         $view = $args{ 'view' };
         delete( $args{ 'view' } );
     }
 
-    map{ if ( defined( $args{ $_ } ) && ( $args{ $_ } ne '' ) ) { $url .= "$_=$args{$_}&"; } } %args;
-    chop( $url );
+    foreach ( keys %args ) {
+        if ( defined( $args{ $_ } ) ) {
+            if ( $args{ $_ } eq '' ) {
+                delete( $args{ $_ } );
+            }
+        } else {
+            delete( $args{ $_ } );
+        }
+    }
+
+    $url = join( '&', map{ "$_=$args{ $_ }"; }( keys %args ) );
 
     if ( $method eq 'post' ) {
-        $req = HTTP::Request->new( POST => $self->{_mail_url} . "?view=$view", $self->{_cookie} );
-        $req = HTTP::Request->new( POST => $self->{_mail_url} . "?search=undefined", $self->{_cookie} );
+        $req = HTTP::Request->new( POST => $req_url . "?view=$view" );
+        $req->header( 'Cookie' => $self->{_cookie} );
         if ( $self->{_proxy_enable} ) {
             $req->proxy_authorization_basic( $self->{_proxy_user}, $self->{_proxy_pass} );
         }
-        $req->content_type( "application/x-www-form-urlencoded" );
         $req->content( $url );
+        $req->header( 'Accept' => 'Accept: application/x-shockwave-flash,text/xml,application/xml,application/xhtml+xml,text/html;q=0.9,text/plain;q=0.8,video/x-mng,image/png,image/jpeg,image/gif;q=0.2,*/*;q=0.1' );
+        $req->header( 'Referer' => 'http://gmail.google.com/gmail?view=cm&zx=ef35c746e701a8732020673145' );
+        $req->content_type( "application/x-www-form-urlencoded" );
+        $req->header( 'Accept-Language' => 'en-us' );
+        $req->header( 'Accept-Encoding' => 'deflate' );
+        $req->header( 'Connection' => 'Keep-Alive' );
+        $req->header( 'Cache-Control' => 'no-cache' );
+        $req->header( 'Cookie' => $self->{_cookie} );
         $res = $self->{_ua}->request( $req );
     } else {
-        delete( $args{ 'method' } );
-        $req = HTTP::Request->new( GET => $self->{_mail_url} . "?$url", $self->{_cookie} );
+        if ( $url ne '' ) {
+           $url = '?' . $url;
+        }
+        $req = HTTP::Request->new( GET => $req_url . "$url" );
+        $req->header( 'Cookie' => $self->{_cookie} );
         if ( $self->{_proxy_enable} ) {
             $req->proxy_authorization_basic( $self->{_proxy_user}, $self->{_proxy_pass} );
         }
         $res = $self->{_ua}->request( $req );
     }
 
-    if ( $res->is_success() ) {
-        update_tokens( $self, $res );
+    if ( $res ) {
+        if ( $res->is_success() ) {
+            update_tokens( $self, $res );
+        } elsif ( $res->previous() ) {
+            update_tokens( $self, $res->previous() );
+        }
     }
 
     return ( $res );
 }
 
 sub size_usage {
-    # Size usage is marked by the line - 'D(["qu","0 MB","1000 MB"]);'
-
     my ( $self, $res ) = @_;
 
     unless ( check_login( $self ) ) { return( undef ) };
@@ -250,11 +278,19 @@ sub size_usage {
 
     if ( $res->is_success() ) {
         if ( defined( $functions{ 'qu' } ) ) {
-            $functions{ 'qu' }[0] =~ /(.*)\s/;
-            my $used = $1;
-            $functions{ 'qu' }[1] =~ /(.*)\s/;
-            my $size = $1;
-            return( $size - $used );
+            if ( wantarray ) {
+                pop( @{ $functions{ 'qu' } } );
+                foreach ( @{ $functions{ 'qu' } } ) {
+                    s/"//g;
+                }
+                return( @{ $functions{ 'qu' } } );
+            } else {
+                $functions{ 'qu' }[0] =~ /"(.*)\s/;
+                my $used = $1;
+                $functions{ 'qu' }[1] =~ /"(.*)\s/;
+                my $size = $1;
+                return( $size - $used );
+            }
         } else {
             $self->{_error} = 1;
             $self->{_err_str} .= "Error: Could not find free space info.\n";
@@ -290,6 +326,19 @@ sub edit_labels {
     } elsif ( $args{ 'action' } eq 'delete' ) {
         $action = 'dc_';
         $args{ 'new_name' } = '';
+    } elsif ( $args{ 'action' } eq 'add' ) {
+        $action = 'ac_';
+        $args{ 'new_name' } = '';
+        unless ( defined( $args{ 'msgid' } ) ) {
+            $self->{_error} = 1;
+            $self->{_err_str} .= "To add a label to a message, you must supply a msgid.\n";
+            return( undef );
+        } else {
+            $args{ 't' } = $args{ 'msgid' };
+            delete( $args{ 'msgid' } );
+            $args{ 'method' } = 'get';
+            $args{ 'search' } = 'all';
+        }
     } elsif ( $args{ 'action' } eq 'rename' ) {
         $args{ 'new_name' } = '^' . validate_label( $self, $args{ 'new_name' } );
         if ( $self->{_error} ) {
@@ -308,7 +357,7 @@ sub edit_labels {
     } else {
         delete( $args{ 'label' } );
         delete( $args{ 'action' } );
-        $args{ 'at' } = $self->{_g_at};
+        $args{ 'at' } = $self->{_cookies}->{GMAIL_AT};
     }
 
     my $res = get_page( $self, %args );
@@ -412,6 +461,82 @@ sub validate_label {
     } else {
         $self->{_error} = 1;
         $self->{_err_str} .= "Error: No labels specified.\n";
+        return( undef );
+    }
+}
+
+sub multi_email {
+    my $array_ref = shift;
+
+    my $email_list;
+    foreach( @{ $array_ref } ) {
+       $email_list .= "<$_>, ";
+    }
+    return( $email_list );
+}
+
+sub send_message {
+    my ( $self ) = shift;
+    my ( %args ) = (
+        start    => '',
+        search   => '',
+        action   => '',
+        view     => 'sm',
+        cmid     => '1'   || $_{cmid},
+        to       => ''    || $_{to},
+        cc       => ''    || $_{cc},
+        bcc      => ''    || $_{bcc},
+        subject  => ''    || $_{subject},
+        msgbody  => ''    || $_{msgbody},
+        method   => 'post',
+        @_,
+    );
+
+    unless ( check_login( $self ) ) { return( undef ) };
+
+    $args{ 'at' } = $self->{_cookies}->{GMAIL_AT};
+
+    if ( ( $args{to} ne '' ) || ( $args{cc} ne '' ) || ( $args{bcc} ne '' ) ) {
+        foreach( 'to', 'cc', 'bcc' ) {
+            if ( ref( $args{$_} ) eq 'ARRAY' ) {
+                $args{$_} = multi_email( $args{$_} );
+            }
+        }
+
+        foreach( keys %args ) {
+            if ( defined( $args{ $_ } ) ) {
+                $args{ $_ } =~ s/&/%26/g;
+            }
+        }
+
+        my $res = get_page( $self, %args );
+        if ( $res->is_success() ) {
+            my %functions = %{ parse_page( $self, $res ) };
+            
+            if ( $self->{_error} ) {
+                return( undef );
+            }
+            unless ( defined( $functions{ 'sr' } ) ) {
+                return( undef );
+            }
+            if ( $functions{ 'sr' }->[1] ) {
+                if ( $functions{ 'sr' }->[3] eq '"0"' ) {
+                    $self->{_error} = 1;
+                    $self->{_err_str} .= "This message has already been sent.\n";
+                    return( undef );
+                } else {
+                    $functions{ 'sr' }->[3] =~ s/"//g;
+                    return( $functions{ 'sr' }->[3] );
+                }
+            } else {
+                $self->{_error} = 1;
+                $self->{_err_str} .= "Message could not be sent.\n";
+                return( undef );
+            }           
+        }
+    } else {
+        $self->{_error} = 1;
+        $self->{_err_str} .= "One of the following must be filled out: to, cc, bcc.\n";
         return( undef );
     }
 }
@@ -845,18 +970,21 @@ Returns an array of all user defined labels.
 
 =head2 EDITING LABELS
 
-There are three actions that can currently be preformed on labels.  As a note, this module enforces Gmail's 
+There are four actions that can currently be preformed on labels.  As a note, this module enforces Gmail's 
 limits on label creation.  A label cannot be over 40 characters, and a label cannot contain the character '^'.  
 On failure, error and error_msg are set.
 
-    #creating new labels
+    #creating new labels.
     $gmail->edit_labels( label => 'label_name', action => 'create' );
 
-    #renaming existing labels
+    #renaming existing labels.
     $gmail->edit_labels( label => 'label_name', action => 'rename', new_name => 'renamed_label' );
 
-    #deleting labels
+    #deleting labels.
     $gmail->edit_labels( label => 'label_name', action => 'delete' );
+
+    #adding a label to a message.
+    $gmail->edit_labels( label => 'label_name', action => 'add', msgid => $message_id );
 
 =head2 RETRIEVING MESSAGE LISTS
 
@@ -898,6 +1026,10 @@ Returns a scalar with the amount of MB remaining in you account.
 
     my $remaining = $gmail->size_usage();
 
+If called in list context, returns an array as follows.
+[ Used, Total, Percent Used ]
+[ "0 MB", "1000 MB", "0%" ]
+
 =head2 INDIVIDUAL MESSAGES
 
 There are two ways to get an individual message:
@@ -936,7 +1068,23 @@ The format provided by Gmail is ( unknowns are denoted by value )
     'recpients email', "value", "value", "value", "date read?", "subject", "blurb?", [["attach id", 
     "attachment name", "encoding", value]], value, "value"]
 
-=head2 ATTACHMENTS
+=head2 SENDING MAIL
+
+The basic format of sending a message is
+
+    $gmail->send_message( to => 'user@domain.com', subject => 'Test Message', msgbody => 'This is a test.' );
+
+To send to multiple users, send an arrayref containing all of the users
+
+    my $email_addrs = [
+        'user1@domain.com',
+        'user2@domain.com',
+        'user3@domain.com', ];
+    $gmail->send_message( to => $email_addrs, subject => 'Test Message', msgbody => 'This is a test.' );
+
+You may also send mail using cc and bcc.
+
+=head2 GETTING ATTACHMENTS
 
 There are two ways to get an attachment:
 
@@ -1015,6 +1163,30 @@ below is a listing of some of the tests that I use as I test various features
 
     my ( $gmail ) = Mail::Webmail::Gmail->new( username => 'username', password => 'password', );
 
+    ### Test Sending Message ####
+    my $msgid = $gmail->send_message( to => 'testuser@test.com', subject => time(), msgbody => 'Test' );
+    print "Msgid: $msgid\n";
+    if ( $msgid ) {
+        if ( $gmail->error() ) {
+            print $gmail->error_msg();
+        } else {
+            ### Create new label ###
+            my $test_label = "tl_" . time();
+            $gmail->edit_labels( label => $test_label, action => 'create' );
+            if ( $gmail->error() ) {
+                print $gmail->error_msg();
+            } else {
+                ### Add this label to our new message ###
+                $gmail->edit_labels( label => $test_label, action => 'add', 'msgid' => $msgid );
+                if ( $gmail->error() ) {
+                    print $gmail->error_msg();
+                } else {
+                    print "Added label: $test_label to message $msgid\n";
+                }
+            }
+        }
+    }
+
     ### Prints out new messages attached to the first label
     my @labels = $gmail->get_labels();
 
@@ -1028,7 +1200,7 @@ below is a listing of some of the tests that I use as I test various features
     ###
 
     ### Prints out all attachments
-    my $messages = $gmail->get_messages();
+    $messages = $gmail->get_messages();
 
     foreach ( @{ $messages } ) {
         my $email = $gmail->get_indv_email( msg => $_ );
@@ -1044,7 +1216,7 @@ below is a listing of some of the tests that I use as I test various features
     ###
 
     ### Shows different ways to look through your email
-    my $messages = $gmail->get_messages();
+    $messages = $gmail->get_messages();
 
     print "By folder\n";
     foreach ( keys %Gmail::FOLDERS ) {
@@ -1059,7 +1231,7 @@ below is a listing of some of the tests that I use as I test various features
 
     print "By label\n";
     foreach ( $gmail->get_labels() ) {
-        my $messages = $gmail->get_messages( label => $_ );
+        $messages = $gmail->get_messages( label => $_ );
         print "\t$_:\n";
         if ( @{ $messages } ) {
             foreach ( @{ $messages } ) {
@@ -1069,21 +1241,13 @@ below is a listing of some of the tests that I use as I test various features
     }
 
     print "All (Note: the All folder skips trash)";
-    my $messages = $gmail->get_messages();
+    $messages = $gmail->get_messages();
     if ( @{ $messages } ) {
         foreach ( @{ $messages } ) {
             print "\t\t$_->{ 'subject' }\n";
         }
     }
     ###
-
-=head1 TO-DO
-
-Right now, this script has the ability to do the reading of the data, but there is
-no ability to modify or create new data ( such as creating new labels or sending mail ).
-
-Also, i dont like the way email is presented to the user ( its too messy and complicated )
-I want individual email messages to be objects as well etc.
 
 =head1 AUTHOR INFORMATION
 
@@ -1105,6 +1269,7 @@ this module started (whether they know it or not)
 
 =item Simon Drabble (Mail::Webmail::Yahoo)
 =item Erik F. Kastner (WWW::Scraper::Gmail)
+=item Abiel J. (C# Gmail API - http://www.migraineheartache.com/)
 
 =back
 
