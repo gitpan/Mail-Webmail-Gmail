@@ -1,0 +1,96 @@
+Mail-Webmail-Gmail version 0.02
+===============================
+
+INSTALLATION
+
+To install this module type the following:
+
+   perl Makefile.PL
+   make
+   make test
+   make install
+
+DEPENDENCIES
+
+This module requires these other modules and libraries:
+
+use lib qw(lib);
+require LWP::UserAgent;
+require HTTP::Headers;
+require HTTP::Cookies;
+require Crypt::SSLeay;
+require Exporter;
+
+COPYRIGHT AND LICENCE
+
+Copyright 2004, Allen Holman.  All rights reserved.  
+
+This library is free software; you can redistribute it and/or modify
+it under the same terms as Perl itself.
+
+SAMPLES USAGE
+
+	my ( $gmail ) = Gmail->new( 
+			username => 'username', password => 'password', );
+
+	### Prints out new messages attached to the first label
+	my @labels = $gmail->get_labels();
+
+	my $messages = $gmail->get_messages( label => $labels[0] );
+
+	foreach ( @{ $messages } ) {
+		if ( $_->{ 'new' } ) {
+			print "Subject: " . $_->{ 'subject' } . " / Blurb: " . $_->{ 'blurb' } . "\n";
+		}
+	}
+	###
+
+	### Prints out all attachments
+	my $messages = $gmail->get_messages();
+
+	foreach ( @{ $messages } ) {
+		my $email = $gmail->get_indv_email( msg => $_ );
+		if ( defined( $email->{ $_->{ 'id' } }->{ 'attachments' } ) ) {
+			foreach ( @{ $email->{ $_->{ 'id' } }->{ 'attachments' } } ) {
+				print ${ $gmail->get_attachment( attachment => $_ ) } . "\n";
+				if ( $gmail->error() ) {
+					print $gmail->error_msg();
+				}
+			}
+		}
+	}
+	###
+
+	### Shows different ways to look through your email
+	my $messages = $gmail->get_messages();
+
+	print "By folder\n";
+	foreach ( keys %Gmail::FOLDERS ) {
+		my $messages = $gmail->get_messages( label => $Gmail::FOLDERS{ $_ } );
+		print "\t$_:\n";
+		if ( @{ $messages } ) {
+			foreach ( @{ $messages } ) {
+				print "\t\t$_->{ 'subject' }\n";
+			}
+		}
+	}
+
+	print "By label\n";
+	foreach ( $gmail->get_labels() ) {
+		my $messages = $gmail->get_messages( label => $_ );
+		print "\t$_:\n";
+		if ( @{ $messages } ) {
+			foreach ( @{ $messages } ) {
+				print "\t\t$_->{ 'subject' }\n";
+			}
+		}
+	}
+
+	print "All (Note: the All folder skips trash)";
+	my $messages = $gmail->get_messages();
+	if ( @{ $messages } ) {
+		foreach ( @{ $messages } ) {
+			print "\t\t$_->{ 'subject' }\n";
+		}
+	}
+	###

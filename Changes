@@ -1,0 +1,8 @@
+Revision history for Perl extension Mail::Webmail::Gmail.
+
+0.01  Wed Jul  7 12:16:45 2004
+	- original version; created by h2xs 1.23 with options
+		-AX Mail::Webmail::Gmail
+
+0.02  Thu Jul  8 14:56:36 2004
+	- first public release;
