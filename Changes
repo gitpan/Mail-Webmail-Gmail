@@ -1,5 +1,12 @@
 Revision history for Perl extension Mail::Webmail::Gmail.
 
+1.00  Sat Sep 12 13:32:00 2004
+    - Fixed some errors in the documentation.
+    - Fixed an error where large message bodies were
+      not returned properly.
+    - Updated documentation with new test scripts.
+    - Added the ability to delete messages.
+
 0.09  Thu Aug 12 22:14:00 2004
     - Added a README.WINDOWS to help with the complexity of installing
       Crypt::SSLeay under that platform.

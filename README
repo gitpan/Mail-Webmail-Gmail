@@ -1,4 +1,4 @@
-Mail-Webmail-Gmail version 0.09
+Mail-Webmail-Gmail version 1.00
 ===============================
 
 INSTALLATION
@@ -40,7 +40,7 @@ Perl and the name and version of the operating system you are using.
 
 SAMPLE USAGE
 
-    my ( $gmail ) = Gmail->new( 
+    my ( $gmail ) = Mail::Webmail::Gmail->new( 
             username => 'username', password => 'password', );
 
     ### Test Sending Message ####
@@ -66,6 +66,21 @@ SAMPLE USAGE
             }
         }
     }
+    ###
+
+    ### Move message to trash ###
+    my $msgid = $gmail->send_message( to => 'testuser@test.com', subject => "del_" . time(), msgbody => 'Test Delete' );
+    if ( $gmail->error() ) {
+        print $gmail->error_msg();
+    } else {
+        $gmail->delete_message( msgid => $msgid, del_message => 0 );
+        if ( $gmail->error() ) {
+            print $gmail->error_msg();
+        } else {
+            print "MSG: $msgid moved to trash\n";
+        }
+    }
+    ###
 
     ### Prints out new messages attached to the first label
     my @labels = $gmail->get_labels();

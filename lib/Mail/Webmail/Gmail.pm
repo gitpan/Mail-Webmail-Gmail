@@ -10,7 +10,7 @@ require HTTP::Request::Common;
 require Crypt::SSLeay;
 require Exporter;
 
-our $VERSION = "0.09";
+our $VERSION = "1.00";
 
 our @ISA = qw(Exporter);
 our @EXPORT_OK = ();
@@ -726,6 +726,83 @@ sub get_messages {
     }
 }
 
+sub delete_message {
+    my ( $self ) = shift;
+    my ( %args ) = (
+        act         => 'tr',
+        method      => 'post',
+        at          => '',
+        del_message => 1,
+        @_, );
+
+    if ( defined( $args{ 'msgid' } ) ) {
+        $args{ 't' } = $args{ 'msgid' };
+        delete( $args{ 'msgid' } );
+    } else {
+        $self->{_error} = 1;
+        $self->{_err_str} .= "Error: No msgid provided.\n";
+        return;
+    }
+
+    my $del_message = $args{ 'del_message' };
+    delete( $args{ 'del_message' } );
+
+    unless ( check_login( $self ) ) { return };
+
+    $args{ 'at' } = $self->{_cookies}->{GMAIL_AT};
+
+    my $res = get_page( $self, %args );
+
+    if ( $res->is_success() ) {
+        my %functions = %{ parse_page( $self, $res ) };
+            
+        if ( $self->{_error} ) {
+            return;
+        }
+        unless ( defined( $functions{ 'ar' } ) ) {
+            return;
+        }
+        if ( $functions{ 'ar' }->[0] ) {
+            if ( $del_message ) {
+                $args{ 'act' } = 'dl';
+                $args{ 'search' } = 'trash';
+                $res = get_page( $self, %args );
+                if ( $res->is_success() ) {
+                    my %functions = %{ parse_page( $self, $res ) };
+            
+                    if ( $self->{_error} ) {
+                        return;
+                    }
+                    unless ( defined( $functions{ 'ar' } ) ) {
+                        return;
+                    }
+                    if ( $functions{ 'ar' }->[0] ) {
+                        return( 1 );
+                    } else {
+                        $self->{_error} = 1;
+                        $self->{_err_str} .= remove_quotes( $functions{ 'ar'}->[1] ) . "\n";
+                        return;
+                    }
+                } else {
+                    $self->{_error} = 1;
+                    $self->{_err_str} .= "Error: While requesting: '$res->{_request}->{_uri}'.\n";
+                    return;
+                }
+            } else {
+                return( 1 );
+            }
+         } else {
+             $self->{_error} = 1;
+             $self->{_err_str} .= remove_quotes( $functions{ 'ar'}->[1] ) . "\n";
+             return;
+        }
+    } else {
+        $self->{_error} = 1;
+        $self->{_err_str} .= "Error: While requesting: '$res->{_request}->{_uri}'.\n";
+        return;
+    }
+}
+
 sub get_indv_email {
     my ( $self ) = shift;
     my ( %args ) = (
@@ -812,8 +889,10 @@ sub get_indv_email {
                 $message{ 'read' }    = remove_quotes( $email[13] );
                 $message{ 'subject' } = remove_quotes( $email[14] );
                 if ( $args{ 'th' } eq $email[2] ) {
-                    my $body = extract_fields( $functions{ 'mb' }->[0] );
-                    $message{ 'body' } = $body->[0];
+                    foreach ( @{ $functions{ 'mb' } } ) {
+                        my $body = extract_fields( $_ );
+                        $message{ 'body' } .= $body->[0];
+                    }
                     if ( defined( $functions{ 'cs' } ) ) {
                         if ( $functions{ 'cs' }[8] ne '' ) {
                             $message{ 'ads' } = get_ads( $self, adkey => remove_quotes( $functions{ 'cs' }[8] ) );
@@ -1056,8 +1135,6 @@ sub parse_page {
             $line =~ s/^\["(.*?)",?//;
             my $function = $1;
             $line =~ s/\]$//;
-            if ( $function eq 't' ) {
-            }
             if ( ( uc( $function ) eq 'MI' ) || ( uc( $function ) eq 'MB' ) ) {
                 $functions{ $function } .= "[$line],";
             } else {
@@ -1212,13 +1289,8 @@ The Array of hashes is in the following format
     $indv_email{ 'sender' }
     $indv_email{ 'subject' }
     $indv_email{ 'blurb' }
-    $indv_email{ 'labels' } = Array
-    $indv_email{ 'attachments' } = Array
-
-The format provided by Gmail is ( unknowns are denoted by value )
-
-    [ ['msgid', new, starred, 'date', 'sender email + name', 'value', 'subject', 'blurb', ['labels'], 
-    'attachments', 'msg id again? (might be thread id)', value ] ]
+    @{ $indv_email{ 'labels' } }
+    @{ $indv_email{ 'attachments' } }
 
 =head2 SPACE REMAINING
 
@@ -1253,28 +1325,22 @@ There are two ways to get an individual message:
 returns a Hash of Hashes containing the data from an individual message in the following format:
 
 Hash of messages in thread by ID
+
     $indv_email{ 'id' }
     $indv_email{ 'sender' }
     $indv_email{ 'sent' }
     $indv_email{ 'to' }
     $indv_email{ 'read' }
     $indv_email{ 'subject' }
-    $indv_email{ 'attachments' } = Array of Arrays
+    @{ $indv_email{ 'attachments' } }
 
-    If it is the main message in the thread
-        $indv_email{ 'body' }
-        $indv_email{ 'ads' } An array of ads in the following format:
-            my %ad_hash = (
-                title       => '',
-                body        => '',
-                vendor_link => '',
-                link        => '', );
-
-The format provided by Gmail is ( unknowns are denoted by value )
-
-    [ [value, order in thread?, "id", value, value, "sender name", "sender email", "sender name", 'date sent?', 
-    'recpients email', "value", "value", "value", "date read?", "subject", "blurb?", [["attach id", 
-    "attachment name", "encoding", value]], value, "value"]
+    #If it is the main message in the thread
+    $indv_email{ 'body' }
+    %{ $indv_email{ 'ads' } } = (
+        title       => '',
+        body        => '',
+        vendor_link => '',
+        link        => '', );
 
 =head2 SENDING MAIL
 
@@ -1295,6 +1361,16 @@ You may also send mail using cc and bcc.
 To attach files to a message
 
     $gmail->send_message( to => 'user@domain.com', subject => 'Test Message', msgbody => 'This is a test.', file0 => ["/tmp/foo"], file1 => ["/tmp/bar"] );
+
+=head2 DELETE MESSAGES
+
+Use the following to move a message to the trash bin
+
+    $gmail->delete_message( msgid => $msgid, del_message => 0 );
+
+To permanently delete a message, just send a msgid
+
+    $gmail->delete_message( msgid => $msgid );
 
 =head2 GETTING ATTACHMENTS
 
@@ -1373,7 +1449,8 @@ manipulate to extract data from Gmail.
 
 below is a listing of some of the tests that I use as I test various features
 
-    my ( $gmail ) = Mail::Webmail::Gmail->new( username => 'username', password => 'password', );
+    my ( $gmail ) = Mail::Webmail::Gmail->new( 
+            username => 'username', password => 'password', );
 
     ### Test Sending Message ####
     my $msgid = $gmail->send_message( to => 'testuser@test.com', subject => time(), msgbody => 'Test' );
@@ -1398,15 +1475,32 @@ below is a listing of some of the tests that I use as I test various features
             }
         }
     }
+    ###
+
+    ### Move message to trash ###
+    my $msgid = $gmail->send_message( to => 'testuser@test.com', subject => "del_" . time(), msgbody => 'Test Delete' );
+    if ( $gmail->error() ) {
+        print $gmail->error_msg();
+    } else {
+        $gmail->delete_message( msgid => $msgid, del_message => 0 );
+        if ( $gmail->error() ) {
+            print $gmail->error_msg();
+        } else {
+            print "MSG: $msgid moved to trash\n";
+        }
+    }
+    ###
 
     ### Prints out new messages attached to the first label
     my @labels = $gmail->get_labels();
 
     my $messages = $gmail->get_messages( label => $labels[0] );
 
-    foreach ( @{ $messages } ) {
-        if ( $_->{ 'new' } ) {
-            print "Subject: " . $_->{ 'subject' } . " / Blurb: " . $_->{ 'blurb' } . "\n";
+    if ( defined( $messages ) ) {
+        foreach ( @{ $messages } ) {
+            if ( $_->{ 'new' } ) {
+                print "Subject: " . $_->{ 'subject' } . " / Blurb: " . $_->{ 'blurb' } . "\n";
+            }
         }
     }
     ###
@@ -1427,12 +1521,28 @@ below is a listing of some of the tests that I use as I test various features
     }
     ###
 
+    ### Prints out the vendor link from Ads attached to a message
+    $messages = $gmail->get_messages( label => $Mail::Webmail::Gmail::FOLDERS{ 'INBOX' } );
+
+    print @{ $messages } . "\n";
+    foreach ( @{ $messages } ) {
+        print "ID: " . $_->{ 'id' } . "\n";
+        my %email = %{ $gmail->get_indv_email( msg => $_ ) };
+        if ( $email{ $_->{ 'id' } }->{ 'ads' } ) {
+            my $ads;
+            foreach $ads ( @{ $email{ $_->{ 'id' } }->{ 'ads' } } ) {
+                print "AD LINK: $ads->{vendor_link}\n";
+            }
+        }
+    }
+    ###
+
     ### Shows different ways to look through your email
     $messages = $gmail->get_messages();
 
     print "By folder\n";
-    foreach ( keys %Mail::Webmail::Gmail::FOLDERS ) {
-        my $messages = $gmail->get_messages( label => $Mail::Webmail::Gmail::FOLDERS{ $_ } );
+    foreach ( keys %Gmail::FOLDERS ) {
+        my $messages = $gmail->get_messages( label => $Gmail::FOLDERS{ $_ } );
         print "\t$_:\n";
         if ( @{ $messages } ) {
             foreach ( @{ $messages } ) {
@@ -1445,9 +1555,11 @@ below is a listing of some of the tests that I use as I test various features
     foreach ( $gmail->get_labels() ) {
         $messages = $gmail->get_messages( label => $_ );
         print "\t$_:\n";
-        if ( @{ $messages } ) {
-            foreach ( @{ $messages } ) {
-                print "\t\t$_->{ 'subject' }\n";
+        if ( defined( $messages ) ) {
+            if ( @{ $messages } ) {
+                foreach ( @{ $messages } ) {
+                    print "\t\t$_->{ 'subject' }\n";
+                }
             }
         }
     }
