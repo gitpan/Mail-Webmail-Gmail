@@ -5,8 +5,15 @@ use ExtUtils::MakeMaker;
 WriteMakefile(
     NAME              => 'Mail::Webmail::Gmail',
     VERSION_FROM      => 'lib/Mail/Webmail/Gmail.pm', # finds $VERSION
-    PREREQ_PM         => {}, # e.g., Module::Name => 1.1
+    PREREQ_PM         => {
+        LWP::UserAgent  => 0,
+        HTTP::Headers   => 0,
+        HTTP::Cookies   => 0,
+        Crypt::SSLeay   => 0,
+        Exporter        => 0,
+        lib             => 0,
+        strict          => 0,
+}, # e.g., Module::Name => 1.1
     ($] >= 5.005 ?     ## Add these new keywords supported since 5.005
-      (ABSTRACT_FROM  => 'lib/Mail/Webmail/Gmail.pm', # retrieve abstract from module
-       AUTHOR         => 'Allen Holman (mincus) mincus@mincus.com') : ()),
+      ( AUTHOR         => 'Allen Holman (mincus) mincus@mincus.com') : ()),
 );
