@@ -28,6 +28,15 @@ Copyright 2004, Allen Holman.  All rights reserved.
 This library is free software; you can redistribute it and/or modify
 it under the same terms as Perl itself.
 
+
+CONTACT INFO
+
+Address bug reports and comments to: mincus \at cpan \. org.  Or through
+AIM at mincus c03.
+
+When sending bug reports, please provide the version of Gmail.pm, the version of
+Perl and the name and version of the operating system you are using. 
+
 SAMPLE USAGE
 
     my ( $gmail ) = Gmail->new( 

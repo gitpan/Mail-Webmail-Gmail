@@ -9,7 +9,7 @@ require HTTP::Cookies;
 require Crypt::SSLeay;
 require Exporter;
 
-our $VERSION = "0.07";
+our $VERSION = "0.08";
 
 our @ISA = qw(Exporter);
 our @EXPORT_OK = ();
@@ -17,8 +17,7 @@ our @EXPORT = ();
 
 our $USER_AGENT = "Mozilla/5.0 (Windows; U; Windows NT 5.1; en-US; rv:1.7) Gecko/20040626 Firefox/0.8";
 our $MAIL_URL = "http://gmail.google.com/gmail";
-our $LOGIN_URL = "https://www.google.com/accounts/ServiceLoginBoxAuth";
-our $VERIFY_URL = "https://www.google.com/accounts/CheckCookie?service=mail&chtml=LoginDoneHtml";
+our $LOGIN_URL = "https://www.google.com/accounts/ServiceLoginBoxAuth?service=mail&continue=http://gmail.google.com/gmail";
 
 our %FOLDERS = (
     'INBOX'   => '^I',
@@ -38,7 +37,6 @@ sub new {
         _username      => $args{username}      || die('No username defined'),
         _password      => $args{password}      || die('No password defined'),
         _login_url     => $args{login_server}  || $LOGIN_URL,
-        _verify_url    => $args{verify_server} || $VERIFY_URL,
         _mail_url      => $args{mail_server}   || $MAIL_URL,
         _proxy_user    => $args{proxy_username}|| '',
         _proxy_pass    => $args{proxy_password}|| '',
@@ -69,9 +67,11 @@ sub error {
 
 sub error_msg {
     my ( $self ) = @_;
+    my $error_msg = $self->{_err_str};
 
     $self->{_error} = 0;
-    return( $self->{_err_str} );
+    $self->{_err_str} = '';
+    return( $error_msg );
 }
 
 sub login {
@@ -92,48 +92,58 @@ sub login {
     }
 
     $req->content_type( "application/x-www-form-urlencoded" );
-    $req->content( 'service=mail&Email=' . $self->{_username} . '&Passwd=' . $self->{_password} . '&null=Sign%20in' );
+    $req->content( 'Email=' . $self->{_username} . '&Passwd=' . $self->{_password} . '&null=Sign%20in' );
     my $res = $self->{_ua}->request( $req );
 
     if ( $res->is_success() ) {
-        $res->content() =~ /cookieVal=[ ]?\"(.*)\";/;
-        $self->{_cookies}->{GV} = $1;
         update_tokens( $self, $res );
-        $req = HTTP::Request->new( GET => $self->{_verify_url} );
-        $req->header( 'Cookie' => $self->{_cookie} );
-        $res = $self->{_ua}->request( $req );
-        if ( $res->is_success() ) {
-            update_tokens( $self, $res );
-            if ( $res->content() =~ /My Account/ ) {
-                $self->{_logged_in} = 1;
-                if ( $self->{_proxy_enable} ) {
-                    if ( $self->{_proxy_enable} >= 1 ) {
-                        $self->{_ua}->proxy( 'http', $self->{_proxy_name} );
-                        delete ( $ENV{HTTPS_PROXY} );
+        if ( $res->content() =~ /top.location = "(.*)";/ ) {
+            $req = HTTP::Request->new( GET => "https://www.google.com/accounts/$1" );
+            $req->header( 'Cookie' => $self->{_cookie} );
+            $res = $self->{_ua}->request( $req );
+            if ( $res->content() =~ /location.replace\("(.*)"\)/ ) {
+                update_tokens( $self, $res );
+                $req = HTTP::Request->new( GET => $1 );
+                $req->header( 'Cookie' => $self->{_cookie} );
+                $res = $self->{_ua}->request( $req );
+                if ( $res->content() =~ /frame name=js src=\/gmail(.*?) / ) {
+                    update_tokens( $self, $res );
+                    if ( $self->{_proxy_enable} ) {
+                        if ( $self->{_proxy_enable} >= 1 ) {
+                            $self->{_ua}->proxy( 'http', $self->{_proxy_name} );
+                            delete ( $ENV{HTTPS_PROXY} );
+                        }
+                        if ( $self->{_proxy_enable} >= 2 ) {
+                            delete ( $ENV{HTTPS_PROXY_USERNAME} );
+                            delete ( $ENV{HTTPS_PROXY_PASSWORD} );
+                        }
                     }
-                    if ( $self->{_proxy_enable} >= 1 ) {
-                        delete ( $ENV{HTTPS_PROXY_USERNAME} );
-                        delete ( $ENV{HTTPS_PROXY_PASSWORD} );
-                    }
+                    $self->{_logged_in} = 1;
+                    get_page( $self, start => '', search => '', view => '', req_url => $self->{_mail_url} . $1 );                  
+                    return( 1 );
+                } else {
+                    $self->{_error} = 1;
+                    $self->{_err_str} .= "Error: Could not login with those credentials\n";
+                     $self->{_err_str} .= "  Additionally, HTTP error: " . $res->status_line . "\n";
+                    return;
                 }
-                get_page( $self, start => '', search => '', view => '', req_url => 'http://gmail.google.com/gmail' );
-                return( 1 );
             } else {
                 $self->{_error} = 1;
                 $self->{_err_str} .= "Error: Could not login with those credentials\n";
-                return undef;
+                $self->{_err_str} .= "  Additionally, HTTP error: " . $res->status_line . "\n";
+                return;
             }
         } else {
             $self->{_error} = 1;
-            $self->{_err_str} .= "Error: While requesting: '$res->{_request}->{_uri}'.\n";
+            $self->{_err_str} .= "Error: Could not login with those credentials\n";
             $self->{_err_str} .= "  Additionally, HTTP error: " . $res->status_line . "\n";
-            return undef;
+            return;
         }
     } else {
         $self->{_error} = 1;
-        $self->{_err_str} .= "Error: While requesting: '$res->{_request}->{_uri}'.\n";
-        $self->{_err_str} .= "  Additionally, LWP returned error: " . $res->status_line . "\n";
-        return undef;
+        $self->{_err_str} .= "Error: Could not login with those credentials\n";
+        $self->{_err_str} .= "  Additionally, HTTP error: " . $res->status_line . "\n";
+        return;
     }
 }
 
@@ -144,7 +154,7 @@ sub check_login {
         unless ( $self->login() ) {
             $self->{_error} = 1;
             $self->{_err_str} .= "Error: Could not Login.\n";
-            return undef;
+            return;
         }
     }
     return ( $self->{_logged_in} );
@@ -191,12 +201,12 @@ sub get_page {
         @_, );
     my ( $res, $req, $req_url );
 
-    unless ( check_login( $self ) ) { return( undef ) };
+    unless ( check_login( $self ) ) { return };
 
     if ( defined( $args{ 'label' } ) ) {
         $args{ 'label' } = validate_label( $self, $args{ 'label' } );
         if ( $self->error ) {
-            return( undef );
+            return;
         } else {
             $args{ 'cat' } = $args{ 'label' };
             delete( $args{ 'label' } );
@@ -264,7 +274,7 @@ sub get_page {
 sub size_usage {
     my ( $self, $res ) = @_;
 
-    unless ( check_login( $self ) ) { return( undef ) };
+    unless ( check_login( $self ) ) { return };
 
     unless ( $res ) {
         $res = get_page( $self );
@@ -273,7 +283,7 @@ sub size_usage {
     my %functions = %{ parse_page( $self, $res ) };
 
     if ( $self->{_error} ) {
-        return( undef );
+        return;
     }
 
     if ( $res->is_success() ) {
@@ -294,12 +304,12 @@ sub size_usage {
         } else {
             $self->{_error} = 1;
             $self->{_err_str} .= "Error: Could not find free space info.\n";
-            return( undef );
+            return;
         }
     } else {
         $self->{_error} = 1;
         $self->{_err_str} .= "Error: While requesting: '$res->{_request}->{_uri}'.\n";
-        return( undef );
+        return;
     }
 }
 
@@ -316,7 +326,7 @@ sub edit_labels {
         @_,
     );
 
-    unless ( check_login( $self ) ) { return( undef ) };
+    unless ( check_login( $self ) ) { return };
 
     my $action;
 
@@ -335,7 +345,7 @@ sub edit_labels {
         unless ( defined( $args{ 'msgid' } ) ) {
             $self->{_error} = 1;
             $self->{_err_str} .= "To add a label to a message, you must supply a msgid.\n";
-            return( undef );
+            return;
         } else {
             $args{ 't' } = $args{ 'msgid' };
             delete( $args{ 'msgid' } );
@@ -345,18 +355,18 @@ sub edit_labels {
     } elsif ( $args{ 'action' } eq 'rename' ) {
         $args{ 'new_name' } = '^' . validate_label( $self, $args{ 'new_name' } );
         if ( $self->{_error} ) {
-            return( undef );
+            return;
         }
         $action = 'nc_';
     } else {
         $self->{_error} = 1;
         $self->{_err_str} .= "Error: No action defined.\n";
-        return( undef );
+        return;
     }
 
     $args{ 'act' } = $action . validate_label( $self, $args{ 'label' } ) . $args{ 'new_name' };
     if ( $self->{_error} ) {
-        return( undef );
+        return;
     } else {
         delete( $args{ 'label' } );
         delete( $args{ 'action' } );
@@ -371,26 +381,26 @@ sub edit_labels {
             unless ( $functions{ 'ar' }->[0] ) {
                 $self->{_error} = 1;
                 $self->{_err_str} .= "Error: " . $functions{ 'ar' }->[1] . "\n";
-                return( undef );
+                return;
             } else {
                 return( 1 );
             }
         } else {
             $self->{_error} = 1;
             $self->{_err_str} .= "Error: Could not find label success message.\n";
-            return( undef );
+            return;
         }
     } else {
         $self->{_error} = 1;
         $self->{_err_str} .= "Error: While requesting: '$res->{_request}->{_uri}'.\n";
-        return( undef );
+        return;
     }
 }
 
 sub get_labels {
     my ( $self, $res ) = @_;
 
-    unless ( check_login( $self ) ) { return( undef ) };
+    unless ( check_login( $self ) ) { return };
 
     unless ( $res ) {
         $res = get_page( $self, search => 'inbox' );
@@ -400,11 +410,11 @@ sub get_labels {
         my %functions = %{ parse_page( $self, $res ) };
 
         if ( $self->{_error} ) {
-            return( undef );
+            return;
         }
 
         unless ( defined( $functions{ 'ct' } ) ) {
-            return( undef );
+            return;
         }
 
         my @fields = @{ extract_fields( $functions{ 'ct' }->[0] ) };
@@ -417,12 +427,12 @@ sub get_labels {
         } else {
             $self->{_error} = 1;
             $self->{_err_str} .= "Error: No Labels found.\n";
-            return( undef );
+            return;
         }
     } else {
         $self->{_error} = 1;
         $self->{_err_str} .= "Error: While requesting: '$res->{_request}->{_uri}'.\n";
-        return( undef );
+        return;
     }    
 }
 
@@ -442,24 +452,24 @@ sub validate_label {
             unless ( $is_folder ) {
                 $self->{_error} = 1;
                 $self->{_err_str} .= "Error: Labels cannot contain the character '^'.\n";
-                return( undef );
+                return;
             }
         }
         if ( length( $label ) > 40 ) {
             $self->{_error} = 1;
             $self->{_err_str} .= "Error: Labels cannot contain more than 40 characters.\n";
-            return( undef );
+            return;
         }
         if ( length( $label ) == 0 ) {
             $self->{_error} = 1;
             $self->{_err_str} .= "Error: No labels specified.\n";
-            return( undef );
+            return;
         }
         return( $label );
     } else {
         $self->{_error} = 1;
         $self->{_err_str} .= "Error: No labels specified.\n";
-        return( undef );
+        return;
     }
 }
 
@@ -472,7 +482,7 @@ sub edit_star {
         @_,
     );
 
-    unless ( check_login( $self ) ) { return( undef ) };
+    unless ( check_login( $self ) ) { return };
 
     my $action;
 
@@ -483,7 +493,7 @@ sub edit_star {
     } else {
         $self->{_error} = 1;
         $self->{_err_str} .= "Error: No action defined.\n";
-        return( undef );
+        return;
     }
     delete( $args{ 'action' } );
 
@@ -493,7 +503,7 @@ sub edit_star {
     } else {
         $self->{_error} = 1;
         $self->{_err_str} .= "Error: No msgid sent.\n";
-        return( undef );
+        return;
     }
 
     $args{ 'at' } = $self->{_cookies}->{GMAIL_AT};
@@ -506,19 +516,19 @@ sub edit_star {
             unless ( $functions{ 'ar' }->[0] ) {
                 $self->{_error} = 1;
                 $self->{_err_str} .= "Error: " . $functions{ 'ar' }->[1] . "\n";
-                return( undef );
+                return;
             } else {
                 return( 1 );
             }
         } else {
             $self->{_error} = 1;
             $self->{_err_str} .= "Error: Could not find label success message.\n";
-            return( undef );
+            return;
         }
     } else {
         $self->{_error} = 1;
         $self->{_err_str} .= "Error: While requesting: '$res->{_request}->{_uri}'.\n";
-        return( undef );
+        return;
     }
 }
 
@@ -531,7 +541,7 @@ sub edit_archive {
         @_,
     );
 
-    unless ( check_login( $self ) ) { return( undef ) };
+    unless ( check_login( $self ) ) { return };
 
     if ( $args{ 'action' } eq 'archive' ) {
         $args{ 'act' } = 'rc_' . lc( $FOLDERS{ 'INBOX' } );
@@ -540,7 +550,7 @@ sub edit_archive {
     } else {
         $self->{_error} = 1;
         $self->{_err_str} .= "Error: No action defined.\n";
-        return( undef );
+        return;
     }
     delete( $args{ 'action' } );
 
@@ -550,7 +560,7 @@ sub edit_archive {
     } else {
         $self->{_error} = 1;
         $self->{_err_str} .= "Error: No msgid sent.\n";
-        return( undef );
+        return;
     }
 
     $args{ 'at' } = $self->{_cookies}->{GMAIL_AT};
@@ -563,19 +573,19 @@ sub edit_archive {
             unless ( $functions{ 'ar' }->[0] ) {
                 $self->{_error} = 1;
                 $self->{_err_str} .= "Error: " . $functions{ 'ar' }->[1] . "\n";
-                return( undef );
+                return;
             } else {
                 return( 1 );
             }
         } else {
             $self->{_error} = 1;
             $self->{_err_str} .= "Error: Could not find archive success message.\n";
-            return( undef );
+            return;
         }
     } else {
         $self->{_error} = 1;
         $self->{_err_str} .= "Error: While requesting: '$res->{_request}->{_uri}'.\n";
-        return( undef );
+        return;
     }
 }
 
@@ -606,7 +616,7 @@ sub send_message {
         @_,
     );
 
-    unless ( check_login( $self ) ) { return( undef ) };
+    unless ( check_login( $self ) ) { return };
 
     $args{ 'at' } = $self->{_cookies}->{GMAIL_AT};
 
@@ -628,16 +638,16 @@ sub send_message {
             my %functions = %{ parse_page( $self, $res ) };
             
             if ( $self->{_error} ) {
-                return( undef );
+                return;
             }
             unless ( defined( $functions{ 'sr' } ) ) {
-                return( undef );
+                return;
             }
             if ( $functions{ 'sr' }->[1] ) {
                 if ( $functions{ 'sr' }->[3] eq '"0"' ) {
                     $self->{_error} = 1;
                     $self->{_err_str} .= "This message has already been sent.\n";
-                    return( undef );
+                    return;
                 } else {
                     $functions{ 'sr' }->[3] =~ s/"//g;
                     return( $functions{ 'sr' }->[3] );
@@ -645,13 +655,13 @@ sub send_message {
             } else {
                 $self->{_error} = 1;
                 $self->{_err_str} .= "Message could not be sent.\n";
-                return( undef );
+                return;
             }           
         }
     } else {
         $self->{_error} = 1;
         $self->{_err_str} .= "One of the following must be filled out: to, cc, bcc.\n";
-        return( undef );
+        return;
     }
 }
 
@@ -664,7 +674,7 @@ sub get_messages {
     if ( defined( $args{ 'label' } ) ) {
         $args{ 'label' } = validate_label( $self, $args{ 'label' } );
         if ( $self->error ) {
-            return( undef );
+            return;
         } else {
             $args{ 'cat' } = $args{ 'label' };
             delete( $args{ 'label' } );
@@ -672,7 +682,7 @@ sub get_messages {
         }
     }
 
-    unless ( check_login( $self ) ) { return( undef ) };
+    unless ( check_login( $self ) ) { return };
 
     $res = get_page( $self, %args );
 
@@ -680,12 +690,12 @@ sub get_messages {
         my %functions = %{ parse_page( $self, $res ) };
 
         if ( $self->{_error} ) {
-            return( undef );
+            return;
         }
         my ( @emails, @letters );
 
         unless ( defined( $functions{ 't' } ) ) {
-            return( undef );
+            return;
         }
 
         foreach ( @{ $functions{ 't' } } ) {
@@ -711,7 +721,7 @@ sub get_messages {
     } else {
         $self->{_error} = 1;
         $self->{_err_str} .= "Error: While requesting: '$res->{_request}->{_uri}'.\n";
-        return( undef );
+        return;
     }
 }
 
@@ -724,7 +734,7 @@ sub get_indv_email {
     if ( defined( $args{ 'id' } ) && defined( $args{ 'label' } ) ) {
         $args{ 'label' } = validate_label( $self, $args{ 'label' } );
         if ( $self->error() ) {
-            return( undef );
+            return;
         } else {
             $args{ 'cat' } = $args{ 'label' };
             delete( $args{ 'label' } );
@@ -738,7 +748,7 @@ sub get_indv_email {
         } else {
             $self->{_error} = 1;
             $self->{_err_str} .= "Error: Not a valid msg reference.\n";
-            return( undef );
+            return;
         }
 
         if ( defined( @{ $args{ 'msg' }->{ 'labels' } } ) ) {
@@ -746,7 +756,7 @@ sub get_indv_email {
                 $args{ 'label' } = validate_label( $self, $args{ 'msg' }->{ 'labels' }->[0] );
                 delete( $args{ 'msg' }->{ 'label' } );
                 if ( $self->error ) {
-                    return( undef );
+                    return;
                 } else {
                     if ( $args{ 'label' } =~ /^\^.$/ ) {
                         $args{ 'label' } = cat_to_search( $args{ 'label' } );
@@ -763,10 +773,10 @@ sub get_indv_email {
     } else {
         $self->{_error} = 1;
         $self->{_err_str} .= "Error: Must specifie either id and label or send a reference to a valid message with msg.\n";
-        return( undef );
+        return;
     }
 
-    unless ( check_login( $self ) ) { return( undef ) };
+    unless ( check_login( $self ) ) { return };
 
     my $res = get_page( $self, %args );
 
@@ -812,7 +822,7 @@ sub get_indv_email {
     } else {
         $self->{_error} = 1;
         $self->{_err_str} .= "Error: While requesting: '$res->{_request}->{_uri}'.\n";
-        return( undef );
+        return;
     }
 }
 
@@ -833,25 +843,25 @@ sub get_attachment {
         } else {
             $self->{_error} = 1;
             $self->{_err_str} .= "Error: Not a valid attachment.1\n";
-            return( undef );
+            return;
         }
         if ( defined( $args{ 'attachment' }->{ 'th' } ) ) {
             $args{ 'th' } = $args{ 'attachment' }->{ 'th' };
         } else {
             $self->{_error} = 1;
             $self->{_err_str} .= "Error: Not a valid attachment.2\n";
-            return( undef );
+            return;
         }
 
         delete( $args{ 'attachment' } );        
     } else {
         $self->{_error} = 1;
         $self->{_err_str} .= "Error: Must supply attid and msgid or a reference to an attachment through 'attachment'.\n";
-        return( undef );
+        return;
     }
 
     
-    unless ( check_login( $self ) ) { return( undef ) };
+    unless ( check_login( $self ) ) { return };
     
     my $res = get_page( $self, %args );
 
@@ -861,7 +871,7 @@ sub get_attachment {
     } else {
         $self->{_error} = 1;
         $self->{_err_str} .= "Error: While requesting attachment: '$res->{_request}->{_uri}'.\n";
-        return( undef );
+        return;
     }
 }
 
@@ -1002,7 +1012,7 @@ sub parse_page {
     } else {
         $self->{_error} = 1;
         $self->{_err_str} .= "Error: While requesting: '$res->{_request}->{_uri}'.\n";
-        return( undef );
+        return;
     }
 }
 
@@ -1380,8 +1390,10 @@ Copyright 2004, Allen Holman.  All rights reserved.
 This library is free software; you can redistribute it and/or modify
 it under the same terms as Perl itself.
 
-Address bug reports and comments to: mincus \at mincus \. com.  When sending
-bug reports, please provide the version of Gmail.pm, the version of
+Address bug reports and comments to: mincus \at cpan \. org.  Or through
+AIM at mincus c03.
+
+When sending bug reports, please provide the version of Gmail.pm, the version of
 Perl and the name and version of the operating system you are using. 
 
 =head1 CREDITS

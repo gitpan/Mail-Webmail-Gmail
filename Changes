@@ -1,5 +1,9 @@
 Revision history for Perl extension Mail::Webmail::Gmail.
 
+0.08  Sat Aug  7 11:54:00 2004
+    - Updated the logon process after Google updated it.
+    - some funtions didnt return undef properly in list context, fixed.
+
 0.07  Thu Jul 15 12:35:00 2004
     - Added the ability to star and unstar messages.
     - Added the ability to achive and unachive messages.
@@ -23,8 +27,8 @@ Revision history for Perl extension Mail::Webmail::Gmail.
 
 0.03  Fri Jul  9 23:36:24 2004
     - Cosmetic fixes
-	    - Replaced Tabs with 4 spaces in all code and documentation.
-	    - Fixed some references incorrectly calling Gmail, "gmail".
+        - Replaced Tabs with 4 spaces in all code and documentation.
+        - Fixed some references incorrectly calling Gmail, "gmail".
     - Updated error_msg.  error_msg now resets error to 0.
     - Added edit_labels, now you can add, rename, and delete labels.
 
@@ -34,4 +38,3 @@ Revision history for Perl extension Mail::Webmail::Gmail.
 0.01  Wed Jul  7 12:16:45 2004
     - original version; created by h2xs 1.23 with options:
         -AX Mail::Webmail::Gmail.
-
