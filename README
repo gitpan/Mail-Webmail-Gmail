@@ -1,4 +1,4 @@
-Mail-Webmail-Gmail version 1.00
+Mail-Webmail-Gmail version 1.01
 ===============================
 
 INSTALLATION
@@ -24,7 +24,7 @@ Exporter
 
 COPYRIGHT AND LICENSE
 
-Copyright 2004, Allen Holman.  All rights reserved.  
+Copyright 2004-2005, Allen Holman.  All rights reserved.  
 
 This library is free software; you can redistribute it and/or modify
 it under the same terms as Perl itself.
@@ -82,6 +82,20 @@ SAMPLE USAGE
     }
     ###
 
+    ### Delete all SPAM folder messages ###
+    my $messages = $gmail->get_messages( label => $Mail::Webmail::Gmail::FOLDERS{ 'SPAM' } );
+    if ( @{ $messages } ) {
+        foreach ( @{ $messages } ) {
+            $gmail->delete_message( msgid => $_->{ 'id' }, search => 'spam', del_message => 1 );
+            if ( $gmail->error() ) {
+                print $gmail->error_msg();
+            } else {
+                print "MSG: " . $_->{ 'id' } . " deleted\n";
+            }
+        }
+    }
+    ###
+
     ### Prints out new messages attached to the first label
     my @labels = $gmail->get_labels();
 
@@ -97,7 +111,7 @@ SAMPLE USAGE
     ###
 
     ### Prints out all attachments
-    $messages = $gmail->get_messages();
+    my $messages = $gmail->get_messages();
 
     foreach ( @{ $messages } ) {
         my $email = $gmail->get_indv_email( msg => $_ );
@@ -113,7 +127,7 @@ SAMPLE USAGE
     ###
 
     ### Prints out the vendor link from Ads attached to a message
-    $messages = $gmail->get_messages( label => $Mail::Webmail::Gmail::FOLDERS{ 'INBOX' } );
+    my $messages = $gmail->get_messages( label => $Mail::Webmail::Gmail::FOLDERS{ 'INBOX' } );
 
     print @{ $messages } . "\n";
     foreach ( @{ $messages } ) {
@@ -129,11 +143,12 @@ SAMPLE USAGE
     ###
 
     ### Shows different ways to look through your email
-    $messages = $gmail->get_messages();
+    my $messages = $gmail->get_messages();
 
     print "By folder\n";
-    foreach ( keys %Gmail::FOLDERS ) {
-        my $messages = $gmail->get_messages( label => $Gmail::FOLDERS{ $_ } );
+    foreach ( keys %Mail::Webmail::Gmail::FOLDERS ) {
+        print "KEY: $_\n";
+        my $messages = $gmail->get_messages( label => $Mail::Webmail::Gmail::FOLDERS{ $_ } );
         print "\t$_:\n";
         if ( @{ $messages } ) {
             foreach ( @{ $messages } ) {
@@ -161,5 +176,20 @@ SAMPLE USAGE
         foreach ( @{ $messages } ) {
             print "\t\t$_->{ 'subject' }\n";
         }
+    }
+    ###
+
+    ### Update preferences
+        if ( $gmail->update_prefs( signature => 'Test Sig.', max_page_size => 100 ) ) {
+            print "Preferences Updated.\n";
+        } else {
+            print "Unable to update preferences.\n";
+        }
+    ###
+
+    ### Show all contact email addresses
+    my ( @contacts ) = @{ $gmail->get_contacts() };
+    foreach ( @contacts ) {
+        print $_->{ 'email' } . "\n";
     }
     ###

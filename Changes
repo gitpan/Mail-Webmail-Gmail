@@ -1,5 +1,17 @@
 Revision history for Perl extension Mail::Webmail::Gmail.
 
+1.01  Sat Feb  7 01:29:00 2005
+    - Fixed proxy variable warnings ( Thank you Bas Couwenberg )
+    - Fixed some mistakes in the documentation ( Thank you Barry D. Hassler )
+    - Fixed error where results were limited by 'Maximum page size'
+      get_messages now returns all matched results. ( Thank you Jon Smith
+      and Christian Mendoza )
+    - Updated documentation with new test scripts.
+    - Clarified how to delete from the spam folder.
+    - Added get_mime_email ( Thank you Marcelo E. Magallón )
+    - Added get_contacts ( Thank you David Westbrook )
+    - Added update_prefs
+
 1.00  Sat Sep 12 13:32:00 2004
     - Fixed some errors in the documentation.
     - Fixed an error where large message bodies were

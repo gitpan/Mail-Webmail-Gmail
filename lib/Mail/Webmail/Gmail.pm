@@ -10,7 +10,7 @@ require HTTP::Request::Common;
 require Crypt::SSLeay;
 require Exporter;
 
-our $VERSION = "1.00";
+our $VERSION = "1.01";
 
 our @ISA = qw(Exporter);
 our @EXPORT_OK = ();
@@ -80,9 +80,9 @@ sub login {
 
     return 0 if $self->{_logged_in};
 
-    if ( $self->{_proxy_enable} >= 1 ) {
+    if ( $self->{_proxy_enable} && $self->{_proxy_enable} >= 1 ) {
         $ENV{HTTPS_PROXY} = $self->{_proxy_name};
-        if ( $self->{_proxy_enable} >= 2 ) {    
+        if ( $self->{_proxy_enable} && $self->{_proxy_enable} >= 2 ) {
             $ENV{HTTPS_PROXY_USERNAME} = $self->{_proxy_user};
             $ENV{HTTPS_PROXY_PASSWORD} = $self->{_proxy_pass};
         }
@@ -244,7 +244,7 @@ sub get_page {
             'Keep-Alive' => 300,
             Cookie       => $self->{_cookie},
             Content      => [ view => $view, %args ] );
-        if ( $self->{_proxy_enable} >= 2 ) {
+        if ( $self->{_proxy_enable} && $self->{_proxy_enable} >= 2 ) {
             $req->proxy_authorization_basic( $self->{_proxy_user}, $self->{_proxy_pass} );
         }
         $res = $self->{_ua}->request( $req );
@@ -255,7 +255,7 @@ sub get_page {
         }
         $req = HTTP::Request->new( GET => $req_url . "$url" );
         $req->header( 'Cookie' => $self->{_cookie} );
-        if ( $self->{_proxy_enable} >= 2 ) {
+        if ( $self->{_proxy_enable} && $self->{_proxy_enable} >= 2 ) {
             $req->proxy_authorization_basic( $self->{_proxy_user}, $self->{_proxy_pass} );
         }
         $res = $self->{_ua}->request( $req );
@@ -669,6 +669,7 @@ sub send_message {
 sub get_messages {
     my ( $self ) = shift;
     my ( %args ) = (
+        start => 0,
         @_, );
     my ( $res, $req );
 
@@ -717,6 +718,16 @@ sub get_messages {
                 $email_line[9] = remove_quotes( $email_line[9] );
             $indv_email{ 'attachments' } = extract_fields( $email_line[9] ) if ( $email_line[9] ne '' );
             push ( @emails, \%indv_email );
+        }
+        if ( @emails == @{ $functions{ 'ts' } }[1] ) {
+            my $start = $args{ 'start' };
+            delete( $args{ 'start' } );
+            if ( $args{ 'cat' } ) {
+                $args{ 'label' } = $args{ 'cat' };
+                delete ( $args{ 'cat' } );
+                delete ( $args{ 'search' } );
+            }
+            @emails = ( @emails, @{ get_messages( $self, start => ( $start + @emails ), %args ) } );
         }
         return ( \@emails );
     } else {
@@ -911,6 +922,120 @@ sub get_indv_email {
     }
 }
 
+sub get_mime_email {
+    my ( $self ) = shift;
+    my ( %args ) = (
+        view   => 'om',
+        @_, );
+
+    if ( defined( $args{ 'id' } ) && defined( $args{ 'label' } ) ) {
+        $args{ 'label' } = validate_label( $self, $args{ 'label' } );
+        if ( $self->error() ) {
+            return;
+        } else {
+            $args{ 'cat' } = $args{ 'label' };
+            delete( $args{ 'label' } );
+            $args{ 'search' } = 'cat';
+        }
+        $args{ 'th' } = $args{ 'id' };
+        delete( $args{ 'id' } );
+    } elsif ( defined( $args{ 'msg' } ) ) {
+        if ( defined( $args{ 'msg' }->{ 'id' } ) ) {
+            $args{ 'th' } = $args{ 'msg' }->{ 'id' };
+        } else {
+            $self->{_error} = 1;
+            $self->{_err_str} .= "Error: Not a valid msg reference.\n";
+            return;
+        }
+
+        if ( defined( @{ $args{ 'msg' }->{ 'labels' } } ) ) {
+            if ( $args{ 'msg' }->{ 'labels' }->[0] ne '' ) {
+                $args{ 'label' } = validate_label( $self, $args{ 'msg' }->{ 'labels' }->[0] );
+                delete( $args{ 'msg' }->{ 'label' } );
+                if ( $self->error ) {
+                    return;
+                } else {
+                    if ( $args{ 'label' } =~ /^\^.$/ ) {
+                        $args{ 'label' } = cat_to_search( $args{ 'label' } );
+                        $args{ 'search' } = $args{ 'label' };
+                    } else {
+                        $args{ 'cat' } = $args{ 'label' };
+                        $args{ 'search' } = 'cat';
+                    }
+                    delete( $args{ 'label' } );
+                }
+            }
+        }
+        delete( $args{ 'msg' } );
+    } else {
+        $self->{_error} = 1;
+        $self->{_err_str} .= "Error: Must specify either id and label or send a reference to a valid message with msg.\n";
+        return;
+    }
+
+    unless ( check_login( $self ) ) { return };
+
+    my $res = get_page( $self, %args );
+
+    if ( $res->is_success() ) {
+        my $content = $res->content;
+        $content =~ s/\r\n/\n/g;
+        $content =~ s/^(\s*\n)+//;
+        return $content;
+    } else {
+        $self->{_error} = 1;
+        $self->{_err_str} .= "Error: While requesting: '$res->{_request}->{_uri}'.\n";
+        return;
+    }
+}
+
+sub get_contacts {
+    my ( $self ) = shift;
+    my ( %args ) = (
+        @_, );
+    my ( $res, $req );
+
+    $args{ 'view' } = 'cl';
+    $args{ 'search' } = 'contacts';
+    $args{ 'start' } = undef;
+    $args{ 'method' } = 'get';
+    $args{ 'pnl' } = $args{ 'frequent' } ? 'p' : 'a';
+    delete $args{ 'frequent' };
+
+    unless ( check_login( $self ) ) { return };
+
+    $res = get_page( $self, %args );
+
+    if ( $res->is_success() ) {
+        my %functions = %{ parse_page( $self, $res ) };
+
+        if ( $self->{_error} ) {
+            return;
+        }
+        my ( @contacts );
+
+        unless ( defined( $functions{ 'a' } ) ) {
+            return;
+        }
+
+        foreach ( @{ $functions{ 'a' } } ) {
+            my @contact_line = @{ extract_fields( $_ ) };
+            my %indv_contact;
+            $indv_contact{ 'id' }            = remove_quotes( $contact_line[0] );
+            $indv_contact{ 'name1' }         = remove_quotes( $contact_line[1] );
+            $indv_contact{ 'name2' }         = remove_quotes( $contact_line[2] );
+            $indv_contact{ 'email' }         = remove_quotes( $contact_line[3] );
+            $indv_contact{ 'note' }          = remove_quotes( $contact_line[4] );
+            push ( @contacts, \%indv_contact );
+        }
+        return ( \@contacts );
+    } else {
+        $self->{_error} = 1;
+        $self->{_err_str} .= "Error: While requesting: '$res->{_request}->{_uri}'.\n";
+        return;
+    }
+}
+
 sub get_ads {
     my ( $self ) = shift;
     my ( %args ) = (
@@ -979,7 +1104,6 @@ sub get_attachment {
             $self->{_err_str} .= "Error: Not a valid attachment.2\n";
             return;
         }
-
         delete( $args{ 'attachment' } );        
     } else {
         $self->{_error} = 1;
@@ -987,7 +1111,6 @@ sub get_attachment {
         return;
     }
 
-    
     unless ( check_login( $self ) ) { return };
     
     my $res = get_page( $self, %args );
@@ -998,6 +1121,105 @@ sub get_attachment {
     } else {
         $self->{_error} = 1;
         $self->{_err_str} .= "Error: While requesting attachment: '$res->{_request}->{_uri}'.\n";
+        return;
+    }
+}
+
+sub update_prefs {
+    my ( $self ) = shift;
+    my ( %args ) = (
+        view         => 'tl',
+        act          => 'prefs',
+        search       => 'inbox',
+        @_, );
+
+    unless ( check_login( $self ) ) { return };
+
+    $args{ 'at' } = $self->{_cookies}->{GMAIL_AT};
+
+    my ( %pref_mappings ) = (
+        bx_hs => 'keyboard_shortcuts',
+        ix_nt => 'max_page_size',
+        bx_sc => 'indicators',
+        sx_dn => 'display_name',
+        bx_ns => 'snippets',
+        sx_rt => 'reply_to',
+        sx_sg => 'signature', );
+
+    my ( %pref_args ) = (
+        view    => 'pr',
+        pnl     => 'g',
+        search  => '',
+        start   => '',
+        method  => '',
+    );
+
+    my $pref_res = get_page( $self, %pref_args );
+
+    if ( $pref_res->is_success() ) {
+        my %functions = %{ parse_page( $self, $pref_res ) };
+
+        if ( $self->{_error} ) {
+            return;
+        }
+
+        unless ( defined( $functions{ 'p' } ) ) {
+            return;
+        }
+
+        ### Delete if equal to the string '' ###
+        foreach ( 'signature', 'reply_to', 'display_name' ) {
+            if ( defined( $args{ $_ } ) ) {
+                if ( $args{ $_ } eq '' ) {
+                    $args{ $_ } = '%0A%0D';
+                }
+            }
+        }
+
+        ### Load Prefs if not redefined ###
+        foreach ( @{ $functions{ 'p' } } ) {
+            my ( @setting ) = @{ extract_fields( $_ ) };
+            foreach ( @setting ) {
+                $_ = remove_quotes( $_ );
+            }
+            unless ( defined( $args{ $pref_mappings{ $setting[0] } } ) ) {
+                $args{ 'p_' . $setting[0] } = $setting[1];
+            } else {
+                $args{ 'p_' . $setting[0] } = $args{ $pref_mappings{ $setting[0] } };
+            }
+            delete( $args{ $pref_mappings{ $setting[0] } } );
+        }
+
+        ### Add preferences to be added ###
+        my %rev_pref_mappings;
+        foreach ( keys %pref_mappings ) {
+            $rev_pref_mappings{ $pref_mappings{ $_ } } = $_;
+        }
+        foreach ( keys %args ) {
+            if ( $rev_pref_mappings{ $_ } ) {
+                $args{ 'p_' . $rev_pref_mappings{ $_ } } = $args{ $_ };
+                delete( $args{ $_ } );
+            }
+        }
+
+        my $res = get_page( $self, %args );
+        if ( $res->is_success() ) {
+            my %functions = %{ parse_page( $self, $res ) };
+            if ( @{ $functions{ 'ar' } }[0] == 1 ) {
+                return( 1 );
+            } else {
+                $self->{_error} = 1;
+                $self->{_err_str} .= "Error: While updating user preferences: '" . remove_quotes( @{ $functions{ 'ar' } }[1] ) . "'.\n";
+                return;
+            }
+        } else {
+            $self->{_error} = 1;
+            $self->{_err_str} .= "Error: While updating user preferences: '$res->{_request}->{_uri}'.\n";
+            return;
+        }    
+    } else {
+        $self->{_error} = 1;
+        $self->{_err_str} .= "Error: While requesting user preferences: '$pref_res->{_request}->{_uri}'.\n";
         return;
     }
 }
@@ -1242,6 +1464,26 @@ On failure, error and error_msg are set.
     #removing a label from a message.
     $gmail->edit_labels( label => 'label_name', action => 'remove', msgid => $message_id );
 
+=head2 UPDATING PREFERENCES
+
+The following are the seven preferences and the allowed values that can currently be changed through Mail::Webmail::Gmail
+
+    keyboard_shortcuts = ( 0, 1 )
+    indicators         = ( 0, 1 )
+    snippets           = ( 0, 1 )
+    max_page_size      = ( 25, 50, 100 )
+    display_name       = ( '', string value up to 96 Characters )
+    reply_to           = ( '', string value up to 320 Characters )
+    signature          = ( '', string value up to 1000 Characters )
+
+Changing preferences can be accomplished by simply sending the preference(s) that you want to change, and the new value.
+
+    $gmail->update_prefs( indicators => 0, reply_to => 'test@test.com' );
+
+To delete display_name, reply_to, or signature simply send a blank string as in the following example.
+
+    $gmail->update_prefs( signature => '' );
+
 =head2 STARRING A MESSAGE
 
 To star or unstar a message use these examples
@@ -1285,8 +1527,8 @@ The Array of hashes is in the following format
     $indv_email{ 'id' }
     $indv_email{ 'new' }
     $indv_email{ 'starred' }
-    $indv_email{ 'date' }
-    $indv_email{ 'sender' }
+    $indv_email{ 'date_received' }
+    $indv_email{ 'sender_email' }
     $indv_email{ 'subject' }
     $indv_email{ 'blurb' }
     @{ $indv_email{ 'labels' } }
@@ -1327,7 +1569,7 @@ returns a Hash of Hashes containing the data from an individual message in the f
 Hash of messages in thread by ID
 
     $indv_email{ 'id' }
-    $indv_email{ 'sender' }
+    $indv_email{ 'sender_email' }
     $indv_email{ 'sent' }
     $indv_email{ 'to' }
     $indv_email{ 'read' }
@@ -1341,6 +1583,37 @@ Hash of messages in thread by ID
         body        => '',
         vendor_link => '',
         link        => '', );
+
+=head2 MIME MESSAGES
+
+This will return an individual message in MIME format.
+
+    The parameters to this function are the same as get_indv_email.
+
+    #prints out the MIME format for all messages in the inbox
+    my $messages = $gmail->get_messages( label => $Mail::Webmail::Gmail::FOLDERS{ 'INBOX' } );
+    foreach ( @{ $messages } ) {
+        my $message = $gmail->get_mime_email( msg => $_ );
+        print $message
+    }
+
+    returns a string that contains the MIME formatted email.
+
+=head2 RETRIEVING CONTACTS
+
+The get_contacts method returns a reference to an AoH with all of the
+Contacts.  This can be limited to the 'Frequently Mailed' contacts
+with a flag:
+
+    my $contacts = $gmail->get_contacts( frequent => 1 );
+
+The Array of hashes is in the following format
+
+    $indv_contact{ 'id' }
+    $indv_contact{ 'name1' }
+    $indv_contact{ 'name2' }
+    $indv_contact{ 'email' }
+    $indv_contact{ 'note' }
 
 =head2 SENDING MAIL
 
@@ -1449,6 +1722,8 @@ manipulate to extract data from Gmail.
 
 below is a listing of some of the tests that I use as I test various features
 
+SAMPLE USAGE
+
     my ( $gmail ) = Mail::Webmail::Gmail->new( 
             username => 'username', password => 'password', );
 
@@ -1491,6 +1766,20 @@ below is a listing of some of the tests that I use as I test various features
     }
     ###
 
+    ### Delete all SPAM folder messages ###
+    my $messages = $gmail->get_messages( label => $Mail::Webmail::Gmail::FOLDERS{ 'SPAM' } );
+    if ( @{ $messages } ) {
+        foreach ( @{ $messages } ) {
+            $gmail->delete_message( msgid => $_->{ 'id' }, search => 'spam', del_message => 1 );
+            if ( $gmail->error() ) {
+                print $gmail->error_msg();
+            } else {
+                print "MSG: " . $_->{ 'id' } . " deleted\n";
+            }
+        }
+    }
+    ###
+
     ### Prints out new messages attached to the first label
     my @labels = $gmail->get_labels();
 
@@ -1506,7 +1795,7 @@ below is a listing of some of the tests that I use as I test various features
     ###
 
     ### Prints out all attachments
-    $messages = $gmail->get_messages();
+    my $messages = $gmail->get_messages();
 
     foreach ( @{ $messages } ) {
         my $email = $gmail->get_indv_email( msg => $_ );
@@ -1522,7 +1811,7 @@ below is a listing of some of the tests that I use as I test various features
     ###
 
     ### Prints out the vendor link from Ads attached to a message
-    $messages = $gmail->get_messages( label => $Mail::Webmail::Gmail::FOLDERS{ 'INBOX' } );
+    my $messages = $gmail->get_messages( label => $Mail::Webmail::Gmail::FOLDERS{ 'INBOX' } );
 
     print @{ $messages } . "\n";
     foreach ( @{ $messages } ) {
@@ -1538,11 +1827,12 @@ below is a listing of some of the tests that I use as I test various features
     ###
 
     ### Shows different ways to look through your email
-    $messages = $gmail->get_messages();
+    my $messages = $gmail->get_messages();
 
     print "By folder\n";
-    foreach ( keys %Gmail::FOLDERS ) {
-        my $messages = $gmail->get_messages( label => $Gmail::FOLDERS{ $_ } );
+    foreach ( keys %Mail::Webmail::Gmail::FOLDERS ) {
+        print "KEY: $_\n";
+        my $messages = $gmail->get_messages( label => $Mail::Webmail::Gmail::FOLDERS{ $_ } );
         print "\t$_:\n";
         if ( @{ $messages } ) {
             foreach ( @{ $messages } ) {
@@ -1573,9 +1863,24 @@ below is a listing of some of the tests that I use as I test various features
     }
     ###
 
+    ### Update preferences
+        if ( $gmail->update_prefs( signature => 'Test Sig.', max_page_size => 100 ) ) {
+            print "Preferences Updated.\n";
+        } else {
+            print "Unable to update preferences.\n";
+        }
+    ###
+
+    ### Show all contact email addresses
+    my ( @contacts ) = @{ $gmail->get_contacts() };
+    foreach ( @contacts ) {
+        print $_->{ 'email' } . "\n";
+    }
+    ###
+
 =head1 AUTHOR INFORMATION
 
-Copyright 2004, Allen Holman.  All rights reserved.  
+Copyright 2004-2005, Allen Holman.  All rights reserved.  
 
 This library is free software; you can redistribute it and/or modify
 it under the same terms as Perl itself.
