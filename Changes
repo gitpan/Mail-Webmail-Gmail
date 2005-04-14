@@ -1,5 +1,9 @@
 Revision history for Perl extension Mail::Webmail::Gmail.
 
+1.02  Wed Apr 13 20:00:00 2005
+    - Google updated login procedure.  Updated Mail::Webmail::Gmail
+      to match.
+
 1.01  Sat Feb  7 01:29:00 2005
     - Fixed proxy variable warnings ( Thank you Bas Couwenberg )
     - Fixed some mistakes in the documentation ( Thank you Barry D. Hassler )

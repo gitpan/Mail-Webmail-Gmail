@@ -10,7 +10,7 @@ require HTTP::Request::Common;
 require Crypt::SSLeay;
 require Exporter;
 
-our $VERSION = "1.01";
+our $VERSION = "1.02";
 
 our @ISA = qw(Exporter);
 our @EXPORT_OK = ();
@@ -106,7 +106,7 @@ sub login {
                 $req = HTTP::Request->new( GET => $1 );
                 $req->header( 'Cookie' => $self->{_cookie} );
                 $res = $self->{_ua}->request( $req );
-                if ( $res->content() =~ /frame name=js src=\/gmail(.*?) / ) {
+                 if ( $res->content() =~ /<script src="(.*)"/ ) {
                     update_tokens( $self, $res );
                     if ( $self->{_proxy_enable} ) {
                         if ( $self->{_proxy_enable} >= 1 ) {
@@ -119,7 +119,7 @@ sub login {
                         }
                     }
                     $self->{_logged_in} = 1;
-                    get_page( $self, start => '', search => '', view => '', req_url => $self->{_mail_url} . $1 );                  
+                    $res = get_page( $self, start => '', search => '', view => '', req_url => $self->{_mail_url} . $1 );
                     return( 1 );
                 } else {
                     $self->{_error} = 1;
@@ -669,6 +669,7 @@ sub send_message {
 sub get_messages {
     my ( $self ) = shift;
     my ( %args ) = (
+        init    => 1,
         start => 0,
         @_, );
     my ( $res, $req );
@@ -1310,7 +1311,8 @@ sub extract_fields {
         if ( $end_field ) {
             if ( $field ne '' ) {
                 push ( @fields, $field );
-            }            $field = '';
+            }
+            $field = '';
             $end_field = 0;
         }
     }
@@ -1890,6 +1892,8 @@ AIM at mincus c03.
 
 When sending bug reports, please provide the version of Gmail.pm, the version of
 Perl and the name and version of the operating system you are using. 
+
+Please visit http://code.mincus.com for other projects that I am working on.
 
 =head1 CREDITS
 

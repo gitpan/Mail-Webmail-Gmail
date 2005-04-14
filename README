@@ -1,4 +1,4 @@
-Mail-Webmail-Gmail version 1.01
+Mail-Webmail-Gmail version 1.02
 ===============================
 
 INSTALLATION
@@ -34,6 +34,8 @@ CONTACT INFO
 
 Address bug reports and comments to: mincus \at cpan \. org.  Or through
 AIM at mincus c03.
+
+Please visit http://code.mincus.com for other projects that I am working on.
 
 When sending bug reports, please provide the version of Gmail.pm, the version of
 Perl and the name and version of the operating system you are using. 
