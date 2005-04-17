@@ -1,5 +1,8 @@
 Revision history for Perl extension Mail::Webmail::Gmail.
 
+1.03.1 Sun Apr 17 18:30:00 2005
+    - Updated version number, missed it on 1.03.
+
 1.03 Sun Apr 17 10:30:00 2005
     - Added the ability to act on multiple messages at one time.  Very useful
       for deleting messages and adding labels.
