@@ -1,4 +1,4 @@
-Mail-Webmail-Gmail version 1.02
+Mail-Webmail-Gmail version 1.03
 ===============================
 
 INSTALLATION
@@ -24,11 +24,21 @@ Exporter
 
 COPYRIGHT AND LICENSE
 
-Copyright 2004-2005, Allen Holman.  All rights reserved.  
+Copyright 2005, Allen Holman.  All rights reserved.  
 
-This library is free software; you can redistribute it and/or modify
-it under the same terms as Perl itself.
+    This program is free software; you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation; either version 2 of the License, or
+    (at your option) any later version.
 
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 
 CONTACT INFO
 
@@ -87,14 +97,23 @@ SAMPLE USAGE
     ### Delete all SPAM folder messages ###
     my $messages = $gmail->get_messages( label => $Mail::Webmail::Gmail::FOLDERS{ 'SPAM' } );
     if ( @{ $messages } ) {
+        my @msgids;
         foreach ( @{ $messages } ) {
-            $gmail->delete_message( msgid => $_->{ 'id' }, search => 'spam', del_message => 1 );
-            if ( $gmail->error() ) {
-                print $gmail->error_msg();
-            } else {
-                print "MSG: " . $_->{ 'id' } . " deleted\n";
-            }
+            push( @msgids, $_->{ 'id' } );
         }
+        $gmail->delete_message( msgid => \@msgids, search => 'spam', del_message => 1 );
+        if ( $gmail->error() ) {
+            print $gmail->error_msg();
+        } else {
+            print "Deleted " . @msgids . " Messages\n";
+        }
+    }
+    ###
+
+    ### Print out all user defined labels
+    my @labels = $gmail->get_labels();
+    foreach ( @labels ) {
+        print "Label: '" . $_ . "'\n";
     }
     ###
 
@@ -131,14 +150,13 @@ SAMPLE USAGE
     ### Prints out the vendor link from Ads attached to a message
     my $messages = $gmail->get_messages( label => $Mail::Webmail::Gmail::FOLDERS{ 'INBOX' } );
 
-    print @{ $messages } . "\n";
     foreach ( @{ $messages } ) {
         print "ID: " . $_->{ 'id' } . "\n";
         my %email = %{ $gmail->get_indv_email( msg => $_ ) };
         if ( $email{ $_->{ 'id' } }->{ 'ads' } ) {
             my $ads;
             foreach $ads ( @{ $email{ $_->{ 'id' } }->{ 'ads' } } ) {
-                print "AD LINK: $ads->{vendor_link}\n";
+                print " - AD LINK: $ads->{vendor_link}\n";
             }
         }
     }
@@ -194,4 +212,9 @@ SAMPLE USAGE
     foreach ( @contacts ) {
         print $_->{ 'email' } . "\n";
     }
+    ###
+
+    ### Print out space remaining in mailbox
+    my $remaining = $gmail->size_usage();
+    print "Remaining: '" . $remaining . "'\n";
     ###

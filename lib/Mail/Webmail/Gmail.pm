@@ -199,7 +199,7 @@ sub get_page {
         method  => '',
         req_url => $self->{_mail_url},
         @_, );
-    my ( $res, $req, $req_url );
+    my ( $res, $req, $req_url, @tees );
 
     unless ( check_login( $self ) ) { return };
 
@@ -211,6 +211,16 @@ sub get_page {
             $args{ 'cat' } = $args{ 'label' };
             delete( $args{ 'label' } );
             $args{ 'search' } = 'cat';
+        }
+    }
+
+    if ( defined( $args{ 't' } ) ) {
+        if ( ref( $args{ 't' } ) eq 'ARRAY' ) {
+            foreach ( @{ $args{ 't' } } ) {
+                push( @tees, 't' );
+                push( @tees, $_ );
+            }
+            delete( $args{ 't' } );
         }
     }
 
@@ -243,7 +253,7 @@ sub get_page {
             Connection   => 'Keep-Alive',
             'Keep-Alive' => 300,
             Cookie       => $self->{_cookie},
-            Content      => [ view => $view, %args ] );
+            Content      => [ view => $view, %args, @tees ] );
         if ( $self->{_proxy_enable} && $self->{_proxy_enable} >= 2 ) {
             $req->proxy_authorization_basic( $self->{_proxy_user}, $self->{_proxy_pass} );
         }
@@ -331,16 +341,16 @@ sub edit_labels {
 
     my $action;
 
-    if ( $args{ 'action' } eq 'create' ) {
+    if ( uc( $args{ 'action' } ) eq 'CREATE' ) {
         $action = 'cc_';
         $args{ 'new_name' } = '';
-    } elsif ( $args{ 'action' } eq 'delete' ) {
+    } elsif ( uc( $args{ 'action' } ) eq 'DELETE' ) {
         $action = 'dc_';
         $args{ 'new_name' } = '';
-    } elsif ( $args{ 'action' } eq 'remove' ) {
+    } elsif ( uc( $args{ 'action' } ) eq 'REMOVE' ) {
         $action = 'rc_';
         $args{ 'new_name' } = '';
-    } elsif ( $args{ 'action' } eq 'add' ) {
+    } elsif ( uc( $args{ 'action' } ) eq 'ADD' ) {
         $action = 'ac_';
         $args{ 'new_name' } = '';
         unless ( defined( $args{ 'msgid' } ) ) {
@@ -350,10 +360,9 @@ sub edit_labels {
         } else {
             $args{ 't' } = $args{ 'msgid' };
             delete( $args{ 'msgid' } );
-            $args{ 'method' } = 'get';
             $args{ 'search' } = 'all';
         }
-    } elsif ( $args{ 'action' } eq 'rename' ) {
+    } elsif ( uc( $args{ 'action' } ) eq 'RENAME' ) {
         $args{ 'new_name' } = '^' . validate_label( $self, $args{ 'new_name' } );
         if ( $self->{_error} ) {
             return;
@@ -720,7 +729,7 @@ sub get_messages {
             $indv_email{ 'attachments' } = extract_fields( $email_line[9] ) if ( $email_line[9] ne '' );
             push ( @emails, \%indv_email );
         }
-        if ( @emails == @{ $functions{ 'ts' } }[1] ) {
+        if ( ( @emails == @{ $functions{ 'ts' } }[1] ) && ( @{ $functions{ 'ts' } }[0] != @{ $functions{ 'ts' } }[2] ) ) {
             my $start = $args{ 'start' };
             delete( $args{ 'start' } );
             if ( $args{ 'cat' } ) {
@@ -728,7 +737,10 @@ sub get_messages {
                 delete ( $args{ 'cat' } );
                 delete ( $args{ 'search' } );
             }
-            @emails = ( @emails, @{ get_messages( $self, start => ( $start + @emails ), %args ) } );
+            my $next_page_emails = get_messages( $self, start => ( $start + @emails ), %args );
+            if ( $next_page_emails ) {
+                @emails = ( @emails, @{ $next_page_emails } );
+            }
         }
         return ( \@emails );
     } else {
@@ -818,7 +830,7 @@ sub delete_message {
 sub get_indv_email {
     my ( $self ) = shift;
     my ( %args ) = (
-        view   => 'pt',
+        view   => 'cv',
         @_, );
 
     if ( defined( $args{ 'id' } ) && defined( $args{ 'label' } ) ) {
@@ -881,7 +893,7 @@ sub get_indv_email {
                 my @email = @{ extract_fields( $_ ) };
                 $email[2] = remove_quotes( $email[2] );
                 if ( $email[16] ne '' ) {
-                    my @attachments = @{ extract_fields( $email[16] ) };
+                    my @attachments = @{ extract_fields( $email[17] ) };
                     my @files;
                     foreach ( @attachments ) {
                         my @attachment = @{ extract_fields( $_ ) };
@@ -895,11 +907,11 @@ sub get_indv_email {
                     $message{ 'attachments' } = \@files;
                 }
                 $message{ 'id' }      = $email[2];
-                $message{ 'sender' }  = remove_quotes( $email[6] );
-                $message{ 'sent' }    = remove_quotes( $email[8] );
-                $message{ 'to' }      = remove_quotes( $email[9] );
-                $message{ 'read' }    = remove_quotes( $email[13] );
-                $message{ 'subject' } = remove_quotes( $email[14] );
+                $message{ 'sender' }  = remove_quotes( $email[7] );
+                $message{ 'sent' }    = remove_quotes( $email[9] );
+                $message{ 'to' }      = remove_quotes( $email[10] );
+                $message{ 'read' }    = remove_quotes( $email[14] );
+                $message{ 'subject' } = remove_quotes( $email[15] );
                 if ( $args{ 'th' } eq $email[2] ) {
                     foreach ( @{ $functions{ 'mb' } } ) {
                         my $body = extract_fields( $_ );
@@ -1048,35 +1060,77 @@ sub get_ads {
 
     unless ( check_login( $self ) ) { return };
 
-    if ( $args{ 'adkey' } ne '' ) {
-        my $res = get_page( $self, %args );
-        if ( $res->is_success() ) {
-            my $ad_text = $res->content();
-            $ad_text =~ s/\n//g;
-            $ad_text =~ /\[\[(.*?)\]\],/;
-            $ad_text = $1;
-            my @indv_ads = @{ extract_fields( $ad_text ) };
-            my @ads;
-            foreach ( @indv_ads ) {
-                my @split_ad = @{ extract_fields( $_ ) };
+    if ( defined( $args{ 'adkey' } ) ) {
+        $args{ 'bb' } = $args{ 'adkey' };
+        delete( $args{ 'adkey' } );
+    } else {
+        $self->{_error} = 1;
+        $self->{_err_str} .= "Error: No addkey provided.\n";
+        return;
+    }
+
+    my $res = get_page( $self, %args );
+    if ( $res->is_success() ) {
+        my $ad_text = $res->content();
+        $ad_text =~ s/\n//g;
+        $ad_text =~ /\[(\[.*?\])\]/;
+        $ad_text = $1;
+        my @indv_ads = @{ extract_fields( $ad_text ) };
+        my @ads;
+        foreach ( @indv_ads ) {
+            my @split_ad = @{ extract_fields( $_ ) };
+            if ( uc( remove_quotes( $split_ad[0] ) ) eq 'A' ) {
+                $split_ad[5] =~ s/<wbr>.*//i;
                 my %ad_hash = (
-                    title       => remove_quotes( $split_ad[0] ),
-                    body        => remove_quotes( $split_ad[1] ),
-                    vendor_link => remove_quotes( $split_ad[2] ),
+                    title       => remove_quotes( $split_ad[2] ),
+                    body        => remove_quotes( $split_ad[3] ),
+                    vendor_link => remove_quotes( $split_ad[5] ),
+                    link        => remove_quotes( $split_ad[4] ), );
+                push( @ads, \%ad_hash );
+            } elsif ( uc( remove_quotes( $split_ad[0] ) ) eq 'RN' ) {
+                if ( $split_ad[3] =~ /redir_url=(.*?)\"/ ) {
+                    my $vendor_link = $1;
+                    my %ad_hash = (
+                        title       => remove_quotes( $split_ad[1] ),
+                        body        => remove_quotes( $split_ad[2] ),
+                        vendor_link => url_unencode( $self, url => $vendor_link ),
+                        link        => remove_quotes( $split_ad[3] ), );
+                    push( @ads, \%ad_hash );
+                }
+            } elsif ( uc( remove_quotes( $split_ad[0] ) ) eq 'RP' ) {
+                my %ad_hash = (
+                    title       => remove_quotes( $split_ad[1] ),
+                    body        => remove_quotes( $split_ad[2] ),
+                    vendor_link => remove_quotes( $split_ad[4] ),
                     link        => remove_quotes( $split_ad[3] ), );
                 push( @ads, \%ad_hash );
             }
-            return( \@ads );
-        } else {
-            $self->{_error} = 1;
-            $self->{_err_str} .= "Error: " . $res->status_line();
         }
+
+        return( \@ads );
     } else {
         $self->{_error} = 1;
-        $self->{_err_str} .= "Error: Must send adkey.\n";
+        $self->{_err_str} .= "Error: " . $res->status_line();
     }
 
     return;
+}
+
+sub url_unencode {
+    my $self = shift;
+    my ( %args ) = (
+        url => '',
+        @_,
+    );
+
+    if ( $args{ 'url' } ) {
+        $args{ 'url' } =~ s/%([a-fA-F0-9][a-fA-F0-9])/pack( "C", hex( $1 ) )/eg;
+        return( $args{ 'url' } );
+    } else {
+        $self->{_error} = 1;
+        $self->{_err_str} .= "Error: Must supply URL to unencode.";
+        return;
+    }
 }
 
 sub get_attachment {
@@ -1647,6 +1701,18 @@ To permanently delete a message, just send a msgid
 
     $gmail->delete_message( msgid => $msgid );
 
+=head2 ACTING ON MULTIPLE MESSAGES
+
+To act on multiple messages at once send an array ref containing all of the message IDs you with to act on.  This is useful because
+Gmail may temporarily ban you if you send too much traffic in a short amount of time (for instance deleting all of the messaging in
+your SPAM folder one at a time).
+
+    ### Delete Many Messages at once ###
+    $gmail->delete_message( msgid => \@msgids, search => 'spam', del_message => 1 );
+
+    ### Applying a label to multiple messages at once ###
+    $gmail->edit_labels( label => 'label_name', action => 'add', msgid => \@msgids );
+
 =head2 GETTING ATTACHMENTS
 
 There are two ways to get an attachment:
@@ -1771,14 +1837,23 @@ SAMPLE USAGE
     ### Delete all SPAM folder messages ###
     my $messages = $gmail->get_messages( label => $Mail::Webmail::Gmail::FOLDERS{ 'SPAM' } );
     if ( @{ $messages } ) {
+        my @msgids;
         foreach ( @{ $messages } ) {
-            $gmail->delete_message( msgid => $_->{ 'id' }, search => 'spam', del_message => 1 );
-            if ( $gmail->error() ) {
-                print $gmail->error_msg();
-            } else {
-                print "MSG: " . $_->{ 'id' } . " deleted\n";
-            }
+            push( @msgids, $_->{ 'id' } );
         }
+        $gmail->delete_message( msgid => \@msgids, search => 'spam', del_message => 1 );
+        if ( $gmail->error() ) {
+            print $gmail->error_msg();
+        } else {
+            print "Deleted " . @msgids . " Messages\n";
+        }
+    }
+    ###
+
+    ### Print out all user defined labels
+    my @labels = $gmail->get_labels();
+    foreach ( @labels ) {
+        print "Label: '" . $_ . "'\n";
     }
     ###
 
@@ -1815,14 +1890,13 @@ SAMPLE USAGE
     ### Prints out the vendor link from Ads attached to a message
     my $messages = $gmail->get_messages( label => $Mail::Webmail::Gmail::FOLDERS{ 'INBOX' } );
 
-    print @{ $messages } . "\n";
     foreach ( @{ $messages } ) {
         print "ID: " . $_->{ 'id' } . "\n";
         my %email = %{ $gmail->get_indv_email( msg => $_ ) };
         if ( $email{ $_->{ 'id' } }->{ 'ads' } ) {
             my $ads;
             foreach $ads ( @{ $email{ $_->{ 'id' } }->{ 'ads' } } ) {
-                print "AD LINK: $ads->{vendor_link}\n";
+                print " - AD LINK: $ads->{vendor_link}\n";
             }
         }
     }
@@ -1880,20 +1954,36 @@ SAMPLE USAGE
     }
     ###
 
+    ### Print out space remaining in mailbox
+    my $remaining = $gmail->size_usage();
+    print "Remaining: '" . $remaining . "'\n";
+    ###
+
 =head1 AUTHOR INFORMATION
 
 Copyright 2004-2005, Allen Holman.  All rights reserved.  
 
-This library is free software; you can redistribute it and/or modify
-it under the same terms as Perl itself.
+    This program is free software; you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation; either version 2 of the License, or
+    (at your option) any later version.
 
-Address bug reports and comments to: mincus \at cpan \. org.  Or through
-AIM at mincus c03.
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+
+Address bug reports and comments to: 
+email: mincus \at cpan \. org
+AIM: mincus c03
+Website: http://code.mincus.com
 
 When sending bug reports, please provide the version of Gmail.pm, the version of
 Perl and the name and version of the operating system you are using. 
-
-Please visit http://code.mincus.com for other projects that I am working on.
 
 =head1 CREDITS
 
