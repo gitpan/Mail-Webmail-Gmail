@@ -10,16 +10,16 @@ require HTTP::Request::Common;
 require Crypt::SSLeay;
 require Exporter;
 
-our $VERSION = "1.03.1";
+our $VERSION = "1.04";
 
 our @ISA = qw(Exporter);
 our @EXPORT_OK = ();
 our @EXPORT = ();
 
-our $USER_AGENT = "Mozilla/5.0 (Windows; U; Windows NT 5.1; en-US; rv:1.7) Gecko/20040626 Firefox/0.8";
-our $MAIL_URL = "http://gmail.google.com/gmail";
-our $SSL_MAIL_URL = "https://gmail.google.com/gmail";
-our $LOGIN_URL = "https://www.google.com/accounts/ServiceLoginBoxAuth?service=mail&continue=http://gmail.google.com/gmail";
+our $USER_AGENT = "User-Agent: Mozilla/5.0 (Windows; U; Windows NT 5.1; en-US; rv:1.7.8) Gecko/20050511 Firefox/1.0.4";
+our $MAIL_URL = "http://mail.google.com/mail";
+our $SSL_MAIL_URL = "https://mail.google.com/mail";
+our $LOGIN_URL = "https://www.google.com/accounts/ServiceLoginBoxAuth?rm=false&service=mail&continue=http://mail.google.com/mail/";
 
 our %FOLDERS = (
     'INBOX'   => '^I',
@@ -36,13 +36,14 @@ sub new {
     push( @LWP::Protocol::http::EXTRA_SOCK_OPTS, SendTE => 0 );
     
     my $self = bless {
-        _username      => $args{username}      || die( 'No username defined' ),
-        _password      => $args{password}      || die( 'No password defined' ),
-        _login_url     => $args{login_server}  || $LOGIN_URL,
-        _mail_url      => $args{mail_server}   || $args{encrypt_session} ? $SSL_MAIL_URL : $MAIL_URL,
-        _proxy_user    => $args{proxy_username}|| '',
-        _proxy_pass    => $args{proxy_password}|| '',
-        _proxy_name    => $args{proxy_name}    || '',
+        _username      => $args{username}       || die( 'No username defined' ),
+        _password      => $args{password}       || die( 'No password defined' ),
+        _login_url     => $args{login_server}   || $LOGIN_URL,
+        _mail_url      => $args{mail_server}    || $args{encrypt_session} ? $SSL_MAIL_URL : $MAIL_URL,
+        _proxy_user    => $args{proxy_username} || '',
+        _proxy_pass    => $args{proxy_password} || '',
+        _proxy_name    => $args{proxy_name}     || '',
+        _proxy_enable  => 0,
         _logged_in     => 0,
         _err_str       => '',
         _cookies       => { },
@@ -92,21 +93,21 @@ sub login {
     my ( $cookie );
 
     $req->content_type( "application/x-www-form-urlencoded" );
-    $req->content( 'Email=' . $self->{_username} . '&Passwd=' . $self->{_password} . '&null=Sign%20in' );
+    $req->content( 'Email=' . $self->{_username} . '&Passwd=' . $self->{_password} . '&null=Sign+in' );
     my $res = $self->{_ua}->request( $req );
 
     if ( $res->is_success() ) {
         update_tokens( $self, $res );
-        if ( $res->content() =~ /top.location = "(.*)";/ ) {
+        if ( $res->content() =~ /top.location = "(.*?)";/ ) {
             $req = HTTP::Request->new( GET => "https://www.google.com/accounts/$1" );
             $req->header( 'Cookie' => $self->{_cookie} );
             $res = $self->{_ua}->request( $req );
-            if ( $res->content() =~ /location.replace\("(.*)"\)/ ) {
+            if ( $res->content() =~ /location.replace\("(.*?)"\)/ ) {
                 update_tokens( $self, $res );
                 $req = HTTP::Request->new( GET => $1 );
                 $req->header( 'Cookie' => $self->{_cookie} );
                 $res = $self->{_ua}->request( $req );
-                 if ( $res->content() =~ /<script src="(.*)"/ ) {
+                 if ( $res->content() =~ /<script src="(.*?)">/ ) {
                     update_tokens( $self, $res );
                     if ( $self->{_proxy_enable} ) {
                         if ( $self->{_proxy_enable} >= 1 ) {

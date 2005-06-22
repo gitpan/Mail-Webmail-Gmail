@@ -1,9 +1,14 @@
 Revision history for Perl extension Mail::Webmail::Gmail.
 
+1.04  Wed Jun 22 17:30:00 2005
+    - Fixed an issue where Mail::Webmail::Gmail showing warnings under -w.
+    - Updated user agent string.
+    - Updated Gmail URLs + Login procedure.
+
 1.03.1 Sun Apr 17 18:30:00 2005
     - Updated version number, missed it on 1.03.
 
-1.03 Sun Apr 17 10:30:00 2005
+1.03  Sun Apr 17 10:30:00 2005
     - Added the ability to act on multiple messages at one time.  Very useful
       for deleting messages and adding labels.
     - Added GPL License Information.
