@@ -10,7 +10,7 @@ require HTTP::Request::Common;
 require Crypt::SSLeay;
 require Exporter;
 
-our $VERSION = "1.04";
+our $VERSION = "1.04.1";
 
 our @ISA = qw(Exporter);
 our @EXPORT_OK = ();
@@ -19,7 +19,7 @@ our @EXPORT = ();
 our $USER_AGENT = "User-Agent: Mozilla/5.0 (Windows; U; Windows NT 5.1; en-US; rv:1.7.8) Gecko/20050511 Firefox/1.0.4";
 our $MAIL_URL = "http://mail.google.com/mail";
 our $SSL_MAIL_URL = "https://mail.google.com/mail";
-our $LOGIN_URL = "https://www.google.com/accounts/ServiceLoginBoxAuth?rm=false&service=mail&continue=http://mail.google.com/mail/";
+our $LOGIN_URL = "https://www.google.com/accounts/ServiceLoginBoxAuth";
 
 our %FOLDERS = (
     'INBOX'   => '^I',
@@ -33,6 +33,8 @@ sub new {
     my %args = @_;
 
     my $ua = new LWP::UserAgent( agent => $USER_AGENT, keep_alive => 1 );
+    $ua->timeout( $args{timeout} ) if defined $args{timeout};
+
     push( @LWP::Protocol::http::EXTRA_SOCK_OPTS, SendTE => 0 );
     
     my $self = bless {
@@ -90,62 +92,71 @@ sub login {
     }
 
     my $req = HTTP::Request->new( POST => $self->{_login_url} );
+    $req->header( 'Cookie' => $self->{_cookie} );
     my ( $cookie );
 
     $req->content_type( "application/x-www-form-urlencoded" );
     $req->content( 'Email=' . $self->{_username} . '&Passwd=' . $self->{_password} . '&null=Sign+in' );
+
     my $res = $self->{_ua}->request( $req );
 
-    if ( $res->is_success() ) {
-        update_tokens( $self, $res );
-        if ( $res->content() =~ /top.location = "(.*?)";/ ) {
-            $req = HTTP::Request->new( GET => "https://www.google.com/accounts/$1" );
-            $req->header( 'Cookie' => $self->{_cookie} );
-            $res = $self->{_ua}->request( $req );
-            if ( $res->content() =~ /location.replace\("(.*?)"\)/ ) {
-                update_tokens( $self, $res );
-                $req = HTTP::Request->new( GET => $1 );
-                $req->header( 'Cookie' => $self->{_cookie} );
-                $res = $self->{_ua}->request( $req );
-                 if ( $res->content() =~ /<script src="(.*?)">/ ) {
-                    update_tokens( $self, $res );
-                    if ( $self->{_proxy_enable} ) {
-                        if ( $self->{_proxy_enable} >= 1 ) {
-                            $self->{_ua}->proxy( 'http', $self->{_proxy_name} );
-                            delete ( $ENV{HTTPS_PROXY} );
-                        }
-                        if ( $self->{_proxy_enable} >= 2 ) {
-                            delete ( $ENV{HTTPS_PROXY_USERNAME} );
-                            delete ( $ENV{HTTPS_PROXY_PASSWORD} );
-                        }
-                    }
-                    $self->{_logged_in} = 1;
-                    $res = get_page( $self, start => '', search => '', view => '', req_url => $self->{_mail_url} . $1 );
-                    return( 1 );
-                } else {
-                    $self->{_error} = 1;
-                    $self->{_err_str} .= "Error: Could not login with those credentials\n";
-                    $self->{_err_str} .= "  Additionally, HTTP error: " . $res->status_line . "\n";
-                    return;
-                }
-            } else {
-                $self->{_error} = 1;
-                $self->{_err_str} .= "Error: Could not login with those credentials\n";
-                $self->{_err_str} .= "  Additionally, HTTP error: " . $res->status_line . "\n";
-                return;
-            }
-        } else {
-            $self->{_error} = 1;
-            $self->{_err_str} .= "Error: Could not login with those credentials\n";
-            $self->{_err_str} .= "  Additionally, HTTP error: " . $res->status_line . "\n";
-            return;
-        }
-    } else {
+    if ( !$res->is_success() ) {
         $self->{_error} = 1;
         $self->{_err_str} .= "Error: Could not login with those credentials\n";
         $self->{_err_str} .= "  Additionally, HTTP error: " . $res->status_line . "\n";
         return;
     }
+
+    update_tokens( $self, $res );
+    if ( $res->content() !~ /var url = "(.*?)"/ ) {
+        $self->{_error} = 1;
+        $self->{_err_str} .= "Error: Could not login with those credentials\n";
+        $self->{_err_str} .= "  Additionally, HTTP error: " . $res->status_line . "\n";
+        return;
+    }
+
+    my $final_url;
+    ( $final_url = $1 ) =~ s/\\u003d/=/;
+
+    $req = HTTP::Request->new( GET => $final_url );
+    $req->header( 'Cookie' => $self->{_cookie} );
+    $res = $self->{_ua}->request( $req );
+    if ( $res->content() !~ /<a href="http:\/\/mail.google.com\/mail\?view=pr&amp;fs=1" target="_blank"> Gmail <\/a>/ ) {
+        $self->{_error} = 1;
+        $self->{_err_str} .= "Error: Could not login with those credentials\n";
+        $self->{_err_str} .= "  Additionally, HTTP error: " . $res->status_line . "\n";
+        return;
+    }
+    update_tokens( $self, $res );
+
+    $req = HTTP::Request->new( GET => 'http://mail.google.com/mail?view=pr&amp;fs=1' );
+    $req->header( 'Cookie' => $self->{_cookie} );
+    $res = $self->{_ua}->request( $req );
+    if ( $res->content() !~ /top.location="(.*?)"/ ) {
+        $self->{_error} = 1;
+        $self->{_err_str} .= "Error: Could not login with those credentials\n";
+        $self->{_err_str} .= "  Additionally, HTTP error: " . $res->status_line . "\n";
+        return;
+    }
+    update_tokens( $self, $res );
+
+    $final_url = ( URI::Escape::uri_unescape( $1 ) );
+    if ( $self->{_proxy_enable} ) {
+        if ( $self->{_proxy_enable} >= 1 ) {
+            $self->{_ua}->proxy( 'http', $self->{_proxy_name} );
+            delete ( $ENV{HTTPS_PROXY} );
+        }
+        if ( $self->{_proxy_enable} >= 2 ) {
+            delete ( $ENV{HTTPS_PROXY_USERNAME} );
+            delete ( $ENV{HTTPS_PROXY_PASSWORD} );
+        }
+    }
+
+    $self->{_logged_in} = 1;
+    $res = get_page( $self, search => '', start => '', view => '', req_url => $final_url );
+    $res = get_page( $self, search => 'inbox' );
+
+    return ( 1 );
 }
 
 sub check_login {
@@ -1797,9 +1808,9 @@ SAMPLE USAGE
             username => 'username', password => 'password', );
 
     ### Test Sending Message ####
-    my $msgid = $gmail->send_message( to => 'testuser@test.com', subject => time(), msgbody => 'Test' );
-    print "Msgid: $msgid\n";
+    my $msgid = $gmail->send_message( to => 'mincus@gmail.com', subject => time(), msgbody => 'Test' );
     if ( $msgid ) {
+        print "Msgid: $msgid\n";
         if ( $gmail->error() ) {
             print $gmail->error_msg();
         } else {
@@ -1817,6 +1828,10 @@ SAMPLE USAGE
                     print "Added label: $test_label to message $msgid\n";
                 }
             }
+        }
+    } else {
+        if ( $gmail->error() ) {
+            print $gmail->error_msg();
         }
     }
     ###
@@ -1858,17 +1873,23 @@ SAMPLE USAGE
     }
     ###
 
-    ### Prints out new messages attached to the first label
+    ### Prints out all _New_ messages attached to the first label
     my @labels = $gmail->get_labels();
-
-    my $messages = $gmail->get_messages( label => $labels[0] );
-
-    if ( defined( $messages ) ) {
-        foreach ( @{ $messages } ) {
-            if ( $_->{ 'new' } ) {
-                print "Subject: " . $_->{ 'subject' } . " / Blurb: " . $_->{ 'blurb' } . "\n";
+    unless ( $gmail->error() ) {
+        my $messages = $gmail->get_messages( label => $labels[0] );
+        unless( $gmail->error() ) {
+            if ( defined( $messages ) ) {
+                foreach ( @{ $messages } ) {
+                    if ( $_->{ 'new' } ) {
+                        print "Subject: " . $_->{ 'subject' } . " / Blurb: " . $_->{ 'blurb' } . "\n";
+                    }
+                }
             }
+        } else {
+            print $gmail->error_msg();
         }
+    } else {
+        print $gmail->error_msg();
     }
     ###
 
@@ -2000,6 +2021,8 @@ this module started (whether they know it or not)
 =item Abiel J. (C# Gmail API - http://www.migraineheartache.com/)
 
 =item Daniel Stutz (http://www.use-strict.net)
+
+=item Shlomi Fish (http://www.shlomifish.org/)
 
 =back
 

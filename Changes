@@ -1,5 +1,9 @@
 Revision history for Perl extension Mail::Webmail::Gmail.
 
+1.04.1 Fri Mar 10 10:30:00 2006
+    - Fixed login for new Gmail login procedure.
+    - Added "timeout" argument.
+
 1.04  Wed Jun 22 17:30:00 2005
     - Fixed an issue where Mail::Webmail::Gmail showing warnings under -w.
     - Updated user agent string.
