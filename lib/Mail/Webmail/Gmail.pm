@@ -10,7 +10,7 @@ require HTTP::Request::Common;
 require Crypt::SSLeay;
 require Exporter;
 
-our $VERSION = "1.05";
+our $VERSION = "1.05.1";
 
 our @ISA = qw(Exporter);
 our @EXPORT_OK = ();
@@ -102,7 +102,7 @@ sub login {
 
     if ( !$res->is_success() ) {
         $self->{_error} = 1;
-        $self->{_err_str} .= "Error: Could not login with those credentials\n";
+        $self->{_err_str} .= "Error: Could not login with those credentials - the request was not a success\n";
         $self->{_err_str} .= "  Additionally, HTTP error: " . $res->status_line . "\n";
         return;
     }
@@ -110,7 +110,7 @@ sub login {
     update_tokens( $self, $res );
     if ( $res->content() !~ /var url = "(.*?)"/ ) {
         $self->{_error} = 1;
-        $self->{_err_str} .= "Error: Could not login with those credentials\n";
+        $self->{_err_str} .= "Error: Could not login with those credentials - could not find final URL\n";
         $self->{_err_str} .= "  Additionally, HTTP error: " . $res->status_line . "\n";
         return;
     }
@@ -121,9 +121,9 @@ sub login {
     $req = HTTP::Request->new( GET => $final_url );
     $req->header( 'Cookie' => $self->{_cookie} );
     $res = $self->{_ua}->request( $req );
-    if ( $res->content() !~ /<a href="http:\/\/mail.google.com\/mail\?view=pr&amp;fs=1" target="_blank"> Gmail <\/a>/ ) {
+    if ( $res->content() !~ /<a href="http:\/\/mail.google.com\/mail\?view=(?:.*?)&amp;fs=(?:.*?)" target="_blank"> (?:.*?) <\/a>/ ) {
         $self->{_error} = 1;
-        $self->{_err_str} .= "Error: Could not login with those credentials\n";
+        $self->{_err_str} .= "Error: Could not login with those credentials - could not find Gmail account.\n";
         $self->{_err_str} .= "  Additionally, HTTP error: " . $res->status_line . "\n";
         return;
     }
@@ -134,7 +134,7 @@ sub login {
     $res = $self->{_ua}->request( $req );
     if ( $res->content() !~ /top.location="(.*?)"/ ) {
         $self->{_error} = 1;
-        $self->{_err_str} .= "Error: Could not login with those credentials\n";
+        $self->{_err_str} .= "Error: Could not login with those credentials - could not find 'top.location'\n";
         $self->{_err_str} .= "  Additionally, HTTP error: " . $res->status_line . "\n";
         return;
     }
@@ -730,10 +730,12 @@ sub get_messages {
             $indv_email{ 'starred' }       = remove_quotes( $email_line[2] );
             $indv_email{ 'date_received' } = remove_quotes( $email_line[3] );
             $indv_email{ 'sender_email' }  = remove_quotes( $email_line[4] );
-                $indv_email{ 'sender_email' } =~ /'\\>(.*?)\\/;
-            $indv_email{ 'sender_name' }   = remove_quotes( $1 );
-                $indv_email{ 'sender_email' } =~ /_user_(.*?)\\/;
-                $indv_email{ 'sender_email' } = remove_quotes( $1 );
+                $indv_email{ 'sender_email' } =~ /\\"(.*?)\\">/;
+                $1 =~ /_(?:.*?)_(.*?)$/;
+                $indv_email{ 'sender_email' } = $1;
+            $indv_email{ 'sender_name' }   = remove_quotes( $email_line[4] );
+                $indv_email{ 'sender_name' } =~ />(?:<b>)?(.*?)<\//;
+                $indv_email{ 'sender_name' } = $1;
             $indv_email{ 'subject' }       = remove_quotes( $email_line[6] );
             $indv_email{ 'blurb' }         = remove_quotes( $email_line[7] );
             $indv_email{ 'labels' } = [ map{ remove_quotes( $_ ) }@{ extract_fields( $email_line[8] ) } ];
@@ -2021,8 +2023,6 @@ this module started (whether they know it or not)
 =item Abiel J. (C# Gmail API - http://www.migraineheartache.com/)
 
 =item Daniel Stutz (http://www.use-strict.net)
-
-=item Shlomi Fish (http://www.shlomifish.org/)
 
 =back
 
