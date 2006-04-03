@@ -1,6 +1,6 @@
 Revision history for Perl extension Mail::Webmail::Gmail.
 
-1.05.1 Mon Apr 02 07:00:00 2006
+1.06 Mon Apr 03 09:30:00 2006
     - Fixed login sequence to allow for difference in Gmail naming conventions.
       It is not called "Gmail" in every country.
     - Updated 'sender_email' for a slight change in the interface.
