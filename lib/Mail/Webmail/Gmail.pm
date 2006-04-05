@@ -10,7 +10,7 @@ require HTTP::Request::Common;
 require Crypt::SSLeay;
 require Exporter;
 
-our $VERSION = "1.06.1";
+our $VERSION = "1.07";
 
 our @ISA = qw(Exporter);
 our @EXPORT_OK = ();
