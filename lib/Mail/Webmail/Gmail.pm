@@ -10,7 +10,7 @@ require HTTP::Request::Common;
 require Crypt::SSLeay;
 require Exporter;
 
-our $VERSION = "1.06";
+our $VERSION = "1.06.1";
 
 our @ISA = qw(Exporter);
 our @EXPORT_OK = ();
@@ -121,7 +121,8 @@ sub login {
     $req = HTTP::Request->new( GET => $final_url );
     $req->header( 'Cookie' => $self->{_cookie} );
     $res = $self->{_ua}->request( $req );
-    if ( $res->content() !~ /<a href="http:\/\/mail.google.com\/mail\?view=(?:.*?)&amp;fs=(?:.*?)" target="_blank"> (?:.*?) <\/a>/ ) {
+    if ( ( $res->content() !~ /<a href="http:\/\/mail\.google\.com\/mail\?view=(?:.*?)&amp;fs=(?:.*?)" target="_blank"> (?:.*?) <\/a>/ ) &&
+       ( $res->content() !~ /<a href="http:\/\/mail\.google\.com\/mail">(?:.*?)<\/a>/ ) ) {
         $self->{_error} = 1;
         $self->{_err_str} .= "Error: Could not login with those credentials - could not find Gmail account.\n";
         $self->{_err_str} .= "  Additionally, HTTP error: " . $res->status_line . "\n";
