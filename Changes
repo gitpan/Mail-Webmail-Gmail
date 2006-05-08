@@ -1,6 +1,9 @@
 Revision history for Perl extension Mail::Webmail::Gmail.
 
-1.06.1 Wed Apr 05 10:00:00 2006
+1.08 Mon May 08 10:00:00 2006
+    - Fixed change in logon sequence.
+
+1.07 Wed Apr 05 10:00:00 2006
     - Fixed change in logon sequence.
 
 1.06 Mon Apr 03 09:30:00 2006
