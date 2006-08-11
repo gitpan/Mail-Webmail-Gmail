@@ -10,7 +10,7 @@ require HTTP::Request::Common;
 require Crypt::SSLeay;
 require Exporter;
 
-our $VERSION = "1.08";
+our $VERSION = "1.09";
 
 our @ISA = qw(Exporter);
 our @EXPORT_OK = ();
@@ -108,7 +108,7 @@ sub login {
     }
 
     update_tokens( $self, $res );
-    if ( $res->content() !~ /var url = "(.*?)"/ ) {
+    if ( $res->content() !~ /var url = (["'])(.*?)\1/ ) {
         $self->{_error} = 1;
         $self->{_err_str} .= "Error: Could not login with those credentials - could not find final URL\n";
         $self->{_err_str} .= "  Additionally, HTTP error: " . $res->status_line . "\n";
@@ -116,7 +116,7 @@ sub login {
     }
 
     my $final_url;
-    ( $final_url = $1 ) =~ s/\\u003d/=/;
+    ( $final_url = $2 ) =~ s/\\u003d/=/;
 
     $req = HTTP::Request->new( GET => $final_url );
     $req->header( 'Cookie' => $self->{_cookie} );
@@ -1042,18 +1042,18 @@ sub get_contacts {
         }
         my ( @contacts );
 
-        unless ( defined( $functions{ 'a' } ) ) {
+        unless ( defined( $functions{ 'cl' } ) ) {
             return;
         }
 
-        foreach ( @{ $functions{ 'a' } } ) {
+        foreach ( @{ $functions{ 'cl' } } ) {
             my @contact_line = @{ extract_fields( $_ ) };
             my %indv_contact;
-            $indv_contact{ 'id' }            = remove_quotes( $contact_line[0] );
-            $indv_contact{ 'name1' }         = remove_quotes( $contact_line[1] );
-            $indv_contact{ 'name2' }         = remove_quotes( $contact_line[2] );
-            $indv_contact{ 'email' }         = remove_quotes( $contact_line[3] );
-            $indv_contact{ 'note' }          = remove_quotes( $contact_line[4] );
+            $indv_contact{ 'id' }            = remove_quotes( $contact_line[1] );
+            $indv_contact{ 'name1' }         = remove_quotes( $contact_line[2] );
+            $indv_contact{ 'name2' }         = remove_quotes( $contact_line[3] );
+            $indv_contact{ 'email' }         = remove_quotes( $contact_line[4] );
+            $indv_contact{ 'note' }          = remove_quotes( $contact_line[5] );
             push ( @contacts, \%indv_contact );
         }
         return ( \@contacts );
